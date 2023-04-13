@@ -3,6 +3,8 @@ use serde::Serialize;
 use std::{collections::HashMap, env, sync::Arc};
 use warp::Filter;
 
+mod telegram_types;
+
 async fn send_message(bot_token: &str, target_chat: i64, text: String, reply: Option<i64>) {
     let end_point: String = format!("https://api.telegram.org/bot{}/sendMessage", bot_token);
     let body = serde_json::json!({
@@ -12,14 +14,6 @@ async fn send_message(bot_token: &str, target_chat: i64, text: String, reply: Op
     });
     let client = reqwest::Client::new();
     client.post(end_point).json(&body).send().await.unwrap();
-}
-
-struct MessageInfo {
-    message_id: i64,
-    chat_id: i64,
-    sender_id: i64,
-    sender_name: String,
-    sender_username: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -185,174 +179,182 @@ impl Game {
         .await;
     }
 
-    async fn handle_dice(&mut self, bot_token: &str, message_info: MessageInfo, dice_value: u8) {
-        if let Ok((finished, turn_changed)) = self.add_dice(message_info.sender_id, dice_value) {
-            if finished {
-                self.hold(message_info.sender_id).unwrap();
-                self.send_results(bot_token, message_info.chat_id).await;
-                self.reset();
-            } else if turn_changed {
-                send_message(
-                    bot_token,
-                    message_info.chat_id,
-                    format!(
-                        "Oops! New turn: {}",
-                        self.get_current_player().get_mention_string()
-                    ),
-                    Some(message_info.message_id),
-                )
-                .await
-            } else {
-                send_message(
-                    bot_token,
-                    message_info.chat_id,
-                    format!(
-                        "{} + {} = {}",
-                        self.get_current_player().score,
-                        self.current_score,
-                        self.get_current_player().score + self.current_score
-                    ),
-                    Some(message_info.message_id),
-                )
-                .await
+    async fn handle_dice(
+        &mut self,
+        bot_token: &str,
+        message: &telegram_types::Message,
+        dice_value: u8,
+    ) {
+        if let Some(sender) = &message.from {
+            if let Ok((finished, turn_changed)) = self.add_dice(sender.id, dice_value) {
+                if finished {
+                    self.hold(sender.id).unwrap();
+                    self.send_results(bot_token, message.chat.id).await;
+                    self.reset();
+                } else if turn_changed {
+                    send_message(
+                        bot_token,
+                        message.chat.id,
+                        format!(
+                            "Oops! New turn: {}",
+                            self.get_current_player().get_mention_string()
+                        ),
+                        Some(message.message_id),
+                    )
+                    .await
+                } else {
+                    send_message(
+                        bot_token,
+                        message.chat.id,
+                        format!(
+                            "{} + {} = {}",
+                            self.get_current_player().score,
+                            self.current_score,
+                            self.get_current_player().score + self.current_score
+                        ),
+                        Some(message.message_id),
+                    )
+                    .await
+                }
             }
         }
     }
-    async fn handle_command(&mut self, bot_token: &str, message_info: &MessageInfo, command: &str) {
-        match command {
-            "/join" | "/join@piiigdicegamebot" => {
-                match self.join(
-                    message_info.sender_id,
-                    message_info.sender_username.clone(),
-                    message_info.sender_name.to_string(),
-                ) {
+    async fn handle_command(
+        &mut self,
+        bot_token: &str,
+        message: &telegram_types::Message,
+        command: &str,
+    ) {
+        if let Some(sender) = &message.from {
+            match command {
+                "/join" | "/join@piiigdicegamebot" => {
+                    match self.join(
+                        sender.id,
+                        sender.username.clone(),
+                        sender.first_name.clone(),
+                    ) {
+                        Ok(_) => {
+                            send_message(
+                                bot_token,
+                                message.chat.id,
+                                "Joined successfully ;)".to_string(),
+                                Some(message.message_id),
+                            )
+                            .await
+                        }
+                        Err(GameLogicError::JoinAfterPlay) => {
+                            send_message(
+                                bot_token,
+                                message.chat.id,
+                                "Game is already started :(".to_string(),
+                                Some(message.message_id),
+                            )
+                            .await
+                        }
+                        Err(GameLogicError::AlreadyJoined) => {
+                            send_message(
+                                bot_token,
+                                message.chat.id,
+                                "You have joined already :)".to_string(),
+                                Some(message.message_id),
+                            )
+                            .await
+                        }
+                        Err(_) => (),
+                    }
+                }
+                "/play" | "/play@piiigdicegamebot" => match self.play() {
                     Ok(_) => {
                         send_message(
                             bot_token,
-                            message_info.chat_id,
-                            "Joined successfully ;)".to_string(),
-                            Some(message_info.message_id),
+                            message.chat.id,
+                            format!(
+                                "Started successfully. Turn: {}",
+                                self.get_current_player().get_mention_string()
+                            ),
+                            Some(message.message_id),
                         )
                         .await
                     }
-                    Err(GameLogicError::JoinAfterPlay) => {
+                    Err(GameLogicError::AlreadyPlaying) => {
                         send_message(
                             bot_token,
-                            message_info.chat_id,
+                            message.chat.id,
                             "Game is already started :(".to_string(),
-                            Some(message_info.message_id),
+                            Some(message.message_id),
                         )
                         .await
                     }
-                    Err(GameLogicError::AlreadyJoined) => {
+                    Err(GameLogicError::NotEnoughPlayers) => {
                         send_message(
                             bot_token,
-                            message_info.chat_id,
-                            "You have joined already :)".to_string(),
-                            Some(message_info.message_id),
+                            message.chat.id,
+                            "Not enough players joined yet :(".to_string(),
+                            Some(message.message_id),
                         )
                         .await
                     }
                     Err(_) => (),
+                },
+                "/hold" | "/hold@piiigdicegamebot" => match self.hold(sender.id) {
+                    Ok(score) => {
+                        send_message(
+                            bot_token,
+                            message.chat.id,
+                            format!(
+                                "Your score is {}. Turn: {}",
+                                score,
+                                self.get_current_player().get_mention_string()
+                            ),
+                            Some(message.message_id),
+                        )
+                        .await
+                    }
+                    Err(GameLogicError::IsNotPlaying) => {
+                        send_message(
+                            bot_token,
+                            message.chat.id,
+                            "Game is not started yet :(".to_string(),
+                            Some(message.message_id),
+                        )
+                        .await
+                    }
+                    Err(GameLogicError::WrongTurn) => {
+                        send_message(
+                            bot_token,
+                            message.chat.id,
+                            "This is not your turn :(".to_string(),
+                            Some(message.message_id),
+                        )
+                        .await
+                    }
+                    Err(_) => (),
+                },
+                "/result" | "/result@piiigdicegamebot" => {
+                    self.send_results(bot_token, message.chat.id).await
                 }
+                "/reset" | "/reset@piiigdicegamebot" => {
+                    self.reset();
+                    send_message(
+                        bot_token,
+                        message.chat.id,
+                        "Game is reset (players should join again).".to_string(),
+                        Some(message.message_id),
+                    )
+                    .await
+                }
+                _ => (),
             }
-            "/play" | "/play@piiigdicegamebot" => match self.play() {
-                Ok(_) => {
-                    send_message(
-                        bot_token,
-                        message_info.chat_id,
-                        format!(
-                            "Started successfully. Turn: {}",
-                            self.get_current_player().get_mention_string()
-                        ),
-                        Some(message_info.message_id),
-                    )
-                    .await
-                }
-                Err(GameLogicError::AlreadyPlaying) => {
-                    send_message(
-                        bot_token,
-                        message_info.chat_id,
-                        "Game is already started :(".to_string(),
-                        Some(message_info.message_id),
-                    )
-                    .await
-                }
-                Err(GameLogicError::NotEnoughPlayers) => {
-                    send_message(
-                        bot_token,
-                        message_info.chat_id,
-                        "Not enough players joined yet :(".to_string(),
-                        Some(message_info.message_id),
-                    )
-                    .await
-                }
-                Err(_) => (),
-            },
-            "/hold" | "/hold@piiigdicegamebot" => match self.hold(message_info.sender_id) {
-                Ok(score) => {
-                    send_message(
-                        bot_token,
-                        message_info.chat_id,
-                        format!(
-                            "Your score is {}. Turn: {}",
-                            score,
-                            self.get_current_player().get_mention_string()
-                        ),
-                        Some(message_info.message_id),
-                    )
-                    .await
-                }
-                Err(GameLogicError::IsNotPlaying) => {
-                    send_message(
-                        bot_token,
-                        message_info.chat_id,
-                        "Game is not started yet :(".to_string(),
-                        Some(message_info.message_id),
-                    )
-                    .await
-                }
-                Err(GameLogicError::WrongTurn) => {
-                    send_message(
-                        bot_token,
-                        message_info.chat_id,
-                        "This is not your turn :(".to_string(),
-                        Some(message_info.message_id),
-                    )
-                    .await
-                }
-                Err(_) => (),
-            },
-            "/result" | "/result@piiigdicegamebot" => {
-                self.send_results(bot_token, message_info.chat_id).await
-            }
-            "/reset" | "/reset@piiigdicegamebot" => {
-                self.reset();
-                send_message(
-                    bot_token,
-                    message_info.chat_id,
-                    "Game is reset (players should join again).".to_string(),
-                    Some(message_info.message_id),
-                )
-                .await
-            }
-            _ => (),
         }
     }
 }
 
 type GameStateStorage = Arc<DashMap<i64, Game>>;
 
-async fn handle_private_message(bot_token: &str, message: &serde_json::Value) {
+async fn handle_private_message(bot_token: &str, message: telegram_types::Message) {
     send_message(
         bot_token,
-        message
-            .get("chat")
-            .unwrap()
-            .get("id")
-            .unwrap()
-            .as_i64()
-            .unwrap(),
+        message.chat.id,
         r"Add this bot to groups to enjoy the Pig (dice) game!".to_string(),
         None,
     )
@@ -361,100 +363,41 @@ async fn handle_private_message(bot_token: &str, message: &serde_json::Value) {
 
 async fn handle_group_message(
     bot_token: &str,
-    message: &serde_json::Value,
+    message: telegram_types::Message,
     storage: GameStateStorage,
 ) {
-    let chat_id = message
-        .get("chat")
-        .unwrap()
-        .get("id")
-        .unwrap()
-        .as_i64()
-        .unwrap();
-    let sender_id = message
-        .get("from")
-        .unwrap()
-        .get("id")
-        .unwrap()
-        .as_i64()
-        .unwrap();
-    let sender_username = message
-        .get("from")
-        .unwrap()
-        .get("username")
-        .unwrap()
-        .as_str();
-    let sender_name = message
-        .get("from")
-        .unwrap()
-        .get("first_name")
-        .unwrap()
-        .as_str()
-        .unwrap();
-    let message_id = message.get("message_id").unwrap().as_i64().unwrap();
-    let message_info = MessageInfo {
-        chat_id,
-        sender_id,
-        sender_username: sender_username.map(String::from),
-        sender_name: sender_name.to_string(),
-        message_id,
-    };
-    let mut game = storage.entry(chat_id).or_insert(Game::new());
+    let mut game = storage.entry(message.chat.id).or_insert(Game::new());
 
-    match message.get("dice") {
+    match message.dice {
         None => {
-            if let Some(entities) = message.get("entities") {
-                for entity in entities.as_array().unwrap() {
-                    if entity.get("type").unwrap().as_str().unwrap() == "bot_command" {
-                        let offset = entity.get("offset").unwrap().as_i64().unwrap() as usize;
-                        let length = entity.get("length").unwrap().as_i64().unwrap() as usize;
-                        game.handle_command(
-                            bot_token,
-                            &message_info,
-                            &message.get("text").unwrap().as_str().unwrap()
-                                [offset..offset + length],
-                        )
-                        .await;
-                    }
-                }
+            for command in message.get_commands() {
+                game.handle_command(bot_token, &message, command.as_str())
+                    .await;
             }
         }
-        Some(dice) => {
-            if dice.get("emoji").unwrap().as_str().unwrap() == "🎲" {
-                game.handle_dice(
-                    bot_token,
-                    message_info,
-                    dice.get("value").unwrap().as_i64().unwrap() as u8,
-                )
-                .await
+        Some(ref dice) => {
+            if matches!(dice.get_type(), telegram_types::DiceType::Dice) {
+                game.handle_dice(bot_token, &message, dice.value as u8)
+                    .await;
             }
         }
     }
 }
 
-async fn handle(bot_token: String, body: serde_json::Value, storage: GameStateStorage) {
-    match body.get("message") {
-        None => (),
-        Some(message) => {
-            match message
-                .get("chat")
-                .unwrap()
-                .get("type")
-                .unwrap()
-                .as_str()
-                .unwrap()
-            {
-                "group" | "supergroup" => handle_group_message(&bot_token, message, storage).await,
-                "private" => handle_private_message(&bot_token, message).await,
-                _ => (),
-            }
+async fn handle(bot_token: String, update: telegram_types::Update, storage: GameStateStorage) {
+    if let Some(message) = update.message {
+        match message.chat.chat_type.as_str() {
+            "group" | "supergroup" => handle_group_message(&bot_token, message, storage).await,
+            "private" => handle_private_message(&bot_token, message).await,
+            _ => (),
         }
     }
 }
 
 #[tokio::main]
 async fn main() {
-    let bot_token: String = env::var("BOT_TOKEN").unwrap();
+    // let bot_token: String = env::var("BOT_TOKEN").unwrap();
+    let bot_token = "5720702639:AAGvpDorO0Phk-Ip_uABCpxf3dsm3ladg1w".to_string();
     let storage = GameStateStorage::new(DashMap::new());
 
     let route = warp::path::end()
@@ -463,7 +406,8 @@ async fn main() {
         .and(warp::any().map(move || bot_token.clone()))
         .and_then(
             |body: serde_json::Value, storage: GameStateStorage, bot_token: String| async {
-                handle(bot_token, body, storage).await;
+                let update: telegram_types::Update = serde_json::value::from_value(body).unwrap();
+                handle(bot_token, update, storage).await;
                 Ok::<_, std::convert::Infallible>(warp::reply())
             },
         );
