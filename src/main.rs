@@ -396,8 +396,7 @@ async fn handle(bot_token: String, update: telegram_types::Update, storage: Game
 
 #[tokio::main]
 async fn main() {
-    // let bot_token: String = env::var("BOT_TOKEN").unwrap();
-    let bot_token = "5720702639:AAGvpDorO0Phk-Ip_uABCpxf3dsm3ladg1w".to_string();
+    let bot_token: String = env::var("BOT_TOKEN").unwrap();
     let storage = GameStateStorage::new(DashMap::new());
 
     let route = warp::path::end()
