@@ -403,16 +403,39 @@ impl GameState {
                     self.send_results(bot_token, message.chat.id).await
                 }
                 "/reset" | "/reset@piiigdicegamebot" => {
-                    self.reset();
-                    send_message(
+                    reply_inline_keyboard(
                         bot_token,
                         message.chat.id,
-                        "Game is reset (players should join again).".to_string(),
-                        Some(message.message_id),
+                        "Are you sure?".to_string(),
+                        message.message_id,
+                        vec![telegram_types::InlineKeyboardButton {
+                            text: "Yes".to_string(),
+                            callback_data: Some("reset".to_string()),
+                        }],
                     )
                     .await
                 }
                 _ => (),
+            }
+        }
+    }
+
+    pub async fn handle_callback_query(
+        &mut self,
+        bot_token: &str,
+        message: &telegram_types::Message,
+        data: Option<String>,
+    ) {
+        if let Some(command) = data {
+            if command.as_str() == "reset" {
+                self.reset();
+                remove_inline_keyboard(
+                    bot_token,
+                    message.chat.id,
+                    "Game is reset (players should join again).".to_string(),
+                    message.message_id,
+                )
+                .await
             }
         }
     }

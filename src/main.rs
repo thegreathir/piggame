@@ -1,4 +1,4 @@
-use dashmap::DashMap;
+use dashmap::{DashMap, mapref::entry::Entry};
 use std::{collections::HashMap, env, sync::Arc};
 use warp::Filter;
 
@@ -11,6 +11,40 @@ async fn send_message(bot_token: &str, target_chat: i64, text: String, reply: Op
         "chat_id": target_chat,
         "text": text,
         "reply_to_message_id": reply
+    });
+    let client = reqwest::Client::new();
+    client.post(end_point).json(&body).send().await.unwrap();
+}
+
+async fn reply_inline_keyboard(
+    bot_token: &str,
+    target_chat: i64,
+    text: String,
+    reply: i64,
+    buttons: Vec<telegram_types::InlineKeyboardButton>,
+) {
+    let end_point: String = format!("https://api.telegram.org/bot{}/sendMessage", bot_token);
+    let body = serde_json::json!({
+        "chat_id": target_chat,
+        "text": text,
+        "reply_to_message_id": reply,
+        "reply_markup": {
+            "inline_keyboard": [buttons]
+        }
+    });
+    let client = reqwest::Client::new();
+    client.post(end_point).json(&body).send().await.unwrap();
+}
+
+async fn remove_inline_keyboard(bot_token: &str, target_chat: i64, text: String, message_id: i64) {
+    let end_point: String = format!("https://api.telegram.org/bot{}/editMessageText", bot_token);
+    let body = serde_json::json!({
+        "chat_id": target_chat,
+        "message_id": message_id,
+        "text": text,
+        "reply_markup": {
+            "inline_keyboard": [[]]
+        }
     });
     let client = reqwest::Client::new();
     client.post(end_point).json(&body).send().await.unwrap();
@@ -63,6 +97,16 @@ async fn handle(bot_token: String, update: telegram_types::Update, storage: Game
             "group" | "supergroup" => handle_group_message(&bot_token, message, storage).await,
             "private" => handle_private_message(&bot_token, message).await,
             _ => (),
+        }
+    } else if let Some(callback_query) = update.callback_query {
+        if let Some(message) = callback_query.message {
+            match storage.entry(message.chat.id) {
+                Entry::Occupied(mut occupied) => {
+                    let game = occupied.get_mut();
+                    game.handle_callback_query(&bot_token, &message, callback_query.data).await
+                },
+                Entry::Vacant(_) => (),
+            }
         }
     }
 }

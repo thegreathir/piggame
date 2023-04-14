@@ -55,6 +55,12 @@ impl Dice {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct InlineKeyboardButton {
+    pub text: String,
+    pub callback_data: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Message {
     pub message_id: i64,
     pub from: Option<User>,
@@ -79,7 +85,16 @@ impl Message {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct CallbackQuery {
+    pub id: String,
+    pub from: User,
+    pub message: Option<Message>,
+    pub data: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Update {
     pub update_id: i64,
     pub message: Option<Message>,
+    pub callback_query: Option<CallbackQuery>,
 }
