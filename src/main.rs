@@ -47,7 +47,9 @@ async fn handle_group_message(
             }
         }
         Some(ref dice) => {
-            if matches!(dice.get_type(), telegram_types::DiceType::Dice) {
+            if matches!(dice.get_type(), telegram_types::DiceType::Dice)
+                && message.forward_date.is_none()
+            {
                 game.handle_dice(bot_token, &message, dice.value as u8)
                     .await;
             }

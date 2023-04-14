@@ -62,6 +62,7 @@ pub struct Message {
     pub text: Option<String>,
     pub dice: Option<Dice>,
     pub entities: Option<Vec<MessageEntity>>,
+    pub forward_date: Option<i64>,
 }
 
 impl Message {
