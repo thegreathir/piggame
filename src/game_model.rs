@@ -1,5 +1,8 @@
-use super::*;
+use super::message_action;
+use super::telegram_types;
+use super::text_messages;
 use rand::seq::SliceRandom;
+use std::collections::HashMap;
 
 #[derive(Clone)]
 struct Player {
@@ -19,7 +22,7 @@ impl Player {
 
     fn show(&self, score: bool) -> String {
         let name = match &self.username {
-            Some(username) => format!("{}({})", self.name, username),
+            Some(username) => format!("{} ({})", self.name, username),
             None => self.name.clone(),
         };
         if score {
@@ -57,7 +60,7 @@ impl NewGame {
         }
     }
 
-    async fn send_players(&self, bot_token: &str, chat_id: i64) {
+    fn send_players(&self, chat_id: i64) -> message_action::MessageAction {
         let text = if self.players.is_empty() {
             "No players!".to_string()
         } else {
@@ -66,7 +69,13 @@ impl NewGame {
             });
             format!("Players:{}", players_text)
         };
-        send_message(bot_token, chat_id, text, None).await
+        message_action::MessageAction::Send(message_action::MessageInfo {
+            chat_id,
+            text,
+            message_id: None,
+            reply_to_message_id: None,
+            reply_markup: None,
+        })
     }
 }
 
@@ -110,7 +119,7 @@ impl PlayingGame {
         self.turn %= self.players.len() as u8;
     }
 
-    async fn send_results(&self, bot_token: &str, chat_id: i64) {
+    fn send_results(&self, chat_id: i64) -> message_action::MessageAction {
         let players_text =
             self.players
                 .iter()
@@ -134,7 +143,13 @@ impl PlayingGame {
                         format!("{}\n- {}", res, player.show(true))
                     }
                 });
-        send_message(bot_token, chat_id, format!("Scores:{}", players_text), None).await
+        message_action::MessageAction::Send(message_action::MessageInfo {
+            chat_id,
+            text: format!("Scores:{}", players_text),
+            message_id: None,
+            reply_to_message_id: None,
+            reply_markup: None,
+        })
     }
 }
 
@@ -235,65 +250,70 @@ impl GameState {
         }
     }
 
-    async fn send_results(&self, bot_token: &str, chat_id: i64) {
+    fn send_results(&self, chat_id: i64) -> message_action::MessageAction {
         match self {
-            GameState::New(new_game) => new_game.send_players(bot_token, chat_id).await,
-            GameState::Playing(playing_game) => playing_game.send_results(bot_token, chat_id).await,
+            GameState::New(new_game) => new_game.send_players(chat_id),
+            GameState::Playing(playing_game) => playing_game.send_results(chat_id),
         }
     }
 
-    pub async fn handle_dice(
+    pub fn handle_dice(
         &mut self,
-        bot_token: &str,
         message: &telegram_types::Message,
         dice_value: u8,
-    ) {
+    ) -> Vec<message_action::MessageAction> {
         if let Some(sender) = &message.from {
             match self.add_dice(sender.id, dice_value) {
                 Ok(AddDiceResult::Finished) => {
-                    self.send_results(bot_token, message.chat.id).await;
+                    let action = self.send_results(message.chat.id);
                     self.reset();
+                    vec![action]
                 }
                 Ok(AddDiceResult::TurnLost(current_player)) => {
-                    send_message(
-                        bot_token,
-                        message.chat.id,
-                        "Oops!".to_string(),
-                        Some(message.message_id),
-                    )
-                    .await;
-                    send_message(
-                        bot_token,
-                        message.chat.id,
-                        format!("Your turn: {}", current_player.get_mention_string()),
-                        None,
-                    )
-                    .await;
+                    vec![
+                        message_action::MessageAction::Send(message_action::MessageInfo {
+                            chat_id: message.chat.id,
+                            text: "Oops!".to_string(),
+                            message_id: None,
+                            reply_to_message_id: Some(message.message_id),
+                            reply_markup: None,
+                        }),
+                        message_action::MessageAction::Send(message_action::MessageInfo {
+                            chat_id: message.chat.id,
+                            text: format!("Your turn: {}", current_player.get_mention_string()),
+                            message_id: None,
+                            reply_to_message_id: None,
+                            reply_markup: None,
+                        }),
+                    ]
                 }
                 Ok(AddDiceResult::Continue(current_player, current_score)) => {
-                    send_message(
-                        bot_token,
-                        message.chat.id,
-                        format!(
-                            "{} + {} = {}",
-                            current_player.score,
-                            current_score,
-                            current_player.score + current_score
-                        ),
-                        Some(message.message_id),
-                    )
-                    .await
+                    vec![message_action::MessageAction::Send(
+                        message_action::MessageInfo {
+                            chat_id: message.chat.id,
+                            text: format!(
+                                "{} + {} = {}",
+                                current_player.score,
+                                current_score,
+                                current_player.score + current_score
+                            ),
+                            message_id: None,
+                            reply_to_message_id: Some(message.message_id),
+                            reply_markup: None,
+                        },
+                    )]
                 }
-                Err(_) => (),
+                Err(_) => vec![],
             }
+        } else {
+            vec![]
         }
     }
-    pub async fn handle_command(
+    pub fn handle_command(
         &mut self,
-        bot_token: &str,
         message: &telegram_types::Message,
         command: &str,
-    ) {
+    ) -> Vec<message_action::MessageAction> {
         if let Some(sender) = &message.from {
             match command {
                 "/join" | "/join@piiigdicegamebot" => {
@@ -303,140 +323,173 @@ impl GameState {
                         sender.first_name.clone(),
                     ) {
                         Ok(_) => {
-                            send_message(
-                                bot_token,
-                                message.chat.id,
-                                "Joined successfully ;)".to_string(),
-                                Some(message.message_id),
-                            )
-                            .await
+                            vec![message_action::MessageAction::Send(
+                                message_action::MessageInfo {
+                                    chat_id: message.chat.id,
+                                    text: "Joined successfully ;)".to_string(),
+                                    message_id: None,
+                                    reply_to_message_id: Some(message.message_id),
+                                    reply_markup: None,
+                                },
+                            )]
                         }
                         Err(GameLogicError::JoinAfterPlay) => {
-                            send_message(
-                                bot_token,
-                                message.chat.id,
-                                "Game is already started :(".to_string(),
-                                Some(message.message_id),
-                            )
-                            .await
+                            vec![message_action::MessageAction::Send(
+                                message_action::MessageInfo {
+                                    chat_id: message.chat.id,
+                                    text: "Game is already started :(".to_string(),
+                                    message_id: None,
+                                    reply_to_message_id: Some(message.message_id),
+                                    reply_markup: None,
+                                },
+                            )]
                         }
                         Err(GameLogicError::AlreadyJoined) => {
-                            send_message(
-                                bot_token,
-                                message.chat.id,
-                                "You have joined already :)".to_string(),
-                                Some(message.message_id),
-                            )
-                            .await
+                            vec![message_action::MessageAction::Send(
+                                message_action::MessageInfo {
+                                    chat_id: message.chat.id,
+                                    text: "You have joined already :)".to_string(),
+                                    message_id: None,
+                                    reply_to_message_id: Some(message.message_id),
+                                    reply_markup: None,
+                                },
+                            )]
                         }
-                        Err(_) => (),
+                        Err(_) => vec![],
                     }
                 }
                 "/play" | "/play@piiigdicegamebot" => match self.play() {
                     Ok(current_player) => {
-                        send_message(
-                            bot_token,
-                            message.chat.id,
-                            format!(
-                                "Started successfully. Turn: {}",
-                                current_player.get_mention_string()
-                            ),
-                            Some(message.message_id),
-                        )
-                        .await
+                        vec![message_action::MessageAction::Send(
+                            message_action::MessageInfo {
+                                chat_id: message.chat.id,
+                                text: format!(
+                                    "Started successfully. Turn: {}",
+                                    current_player.get_mention_string()
+                                ),
+                                message_id: None,
+                                reply_to_message_id: Some(message.message_id),
+                                reply_markup: None,
+                            },
+                        )]
                     }
                     Err(GameLogicError::AlreadyPlaying) => {
-                        send_message(
-                            bot_token,
-                            message.chat.id,
-                            "Game is already started :(".to_string(),
-                            Some(message.message_id),
-                        )
-                        .await
+                        vec![message_action::MessageAction::Send(
+                            message_action::MessageInfo {
+                                chat_id: message.chat.id,
+                                text: "Game is already started :(".to_string(),
+                                message_id: None,
+                                reply_to_message_id: Some(message.message_id),
+                                reply_markup: None,
+                            },
+                        )]
                     }
                     Err(GameLogicError::NotEnoughPlayers) => {
-                        send_message(
-                            bot_token,
-                            message.chat.id,
-                            "Not enough players joined yet :(".to_string(),
-                            Some(message.message_id),
-                        )
-                        .await
+                        vec![message_action::MessageAction::Send(
+                            message_action::MessageInfo {
+                                chat_id: message.chat.id,
+                                text: "Not enough players joined yet :(".to_string(),
+                                message_id: None,
+                                reply_to_message_id: Some(message.message_id),
+                                reply_markup: None,
+                            },
+                        )]
                     }
-                    Err(_) => (),
+                    Err(_) => vec![],
                 },
                 "/hold" | "/hold@piiigdicegamebot" => match self.hold(sender.id) {
                     Ok((score, current_player)) => {
-                        send_message(
-                            bot_token,
-                            message.chat.id,
-                            format!(
-                                "Your score is {}. Turn: {}",
-                                score,
-                                current_player.get_mention_string()
-                            ),
-                            Some(message.message_id),
-                        )
-                        .await
+                        vec![message_action::MessageAction::Send(
+                            message_action::MessageInfo {
+                                chat_id: message.chat.id,
+                                text: format!(
+                                    "Your score is {}. Turn: {}",
+                                    score,
+                                    current_player.get_mention_string()
+                                ),
+                                message_id: None,
+                                reply_to_message_id: Some(message.message_id),
+                                reply_markup: None,
+                            },
+                        )]
                     }
                     Err(GameLogicError::IsNotPlaying) => {
-                        send_message(
-                            bot_token,
-                            message.chat.id,
-                            "Game is not started yet :(".to_string(),
-                            Some(message.message_id),
-                        )
-                        .await
+                        vec![message_action::MessageAction::Send(
+                            message_action::MessageInfo {
+                                chat_id: message.chat.id,
+                                text: "Game is not started yet :(".to_string(),
+                                message_id: None,
+                                reply_to_message_id: Some(message.message_id),
+                                reply_markup: None,
+                            },
+                        )]
                     }
                     Err(GameLogicError::WrongTurn) => {
-                        send_message(
-                            bot_token,
-                            message.chat.id,
-                            "This is not your turn :(".to_string(),
-                            Some(message.message_id),
-                        )
-                        .await
+                        vec![message_action::MessageAction::Send(
+                            message_action::MessageInfo {
+                                chat_id: message.chat.id,
+                                text: "This is not your turn :(".to_string(),
+                                message_id: None,
+                                reply_to_message_id: Some(message.message_id),
+                                reply_markup: None,
+                            },
+                        )]
                     }
-                    Err(_) => (),
+                    Err(_) => vec![],
                 },
                 "/result" | "/result@piiigdicegamebot" => {
-                    self.send_results(bot_token, message.chat.id).await
+                    vec![self.send_results(message.chat.id)]
                 }
                 "/reset" | "/reset@piiigdicegamebot" => {
-                    reply_inline_keyboard(
-                        bot_token,
-                        message.chat.id,
-                        "Are you sure?".to_string(),
-                        message.message_id,
-                        vec![telegram_types::InlineKeyboardButton {
-                            text: "Yes".to_string(),
-                            callback_data: Some("reset".to_string()),
-                        }],
-                    )
-                    .await
+                    vec![message_action::MessageAction::Send(
+                        message_action::MessageInfo {
+                            chat_id: message.chat.id,
+                            text: "Are you sure?".to_string(),
+                            message_id: None,
+                            reply_to_message_id: Some(message.message_id),
+                            reply_markup: Some(telegram_types::ReplyMarkup {
+                                inline_keyboard: Some(vec![vec![
+                                    telegram_types::InlineKeyboardButton {
+                                        text: "Yes".to_string(),
+                                        callback_data: Some("reset".to_string()),
+                                    },
+                                ]]),
+                            }),
+                        },
+                    )]
                 }
-                _ => (),
+                _ => vec![],
             }
+        } else {
+            vec![]
         }
     }
 
-    pub async fn handle_callback_query(
+    pub fn handle_callback_query(
         &mut self,
-        bot_token: &str,
         message: &telegram_types::Message,
         data: Option<String>,
-    ) {
+    ) -> Vec<message_action::MessageAction> {
         if let Some(command) = data {
             if command.as_str() == "reset" {
                 self.reset();
-                remove_inline_keyboard(
-                    bot_token,
-                    message.chat.id,
-                    "Game is reset (players should join again).".to_string(),
-                    message.message_id,
-                )
-                .await
+
+                vec![message_action::MessageAction::Edit(
+                    message_action::MessageInfo {
+                        chat_id: message.chat.id,
+                        text: "Game is reset (players should join again).".to_string(),
+                        message_id: Some(message.message_id),
+                        reply_to_message_id: None,
+                        reply_markup: Some(telegram_types::ReplyMarkup {
+                            inline_keyboard: Some(vec![vec![]]),
+                        }),
+                    },
+                )]
+            } else {
+                vec![]
             }
+        } else {
+            vec![]
         }
     }
 }

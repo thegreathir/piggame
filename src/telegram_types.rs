@@ -61,6 +61,11 @@ pub struct InlineKeyboardButton {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct ReplyMarkup {
+    pub inline_keyboard: Option<Vec<Vec<InlineKeyboardButton>>>
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Message {
     pub message_id: i64,
     pub from: Option<User>,

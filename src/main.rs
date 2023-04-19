@@ -1,71 +1,33 @@
-use dashmap::{DashMap, mapref::entry::Entry};
-use std::{collections::HashMap, env, sync::Arc};
+use dashmap::{mapref::entry::Entry, DashMap};
+use std::{env, sync::Arc};
 use warp::Filter;
 
+mod game_model;
+mod message_action;
 mod telegram_types;
 mod text_messages;
 
-async fn send_message(bot_token: &str, target_chat: i64, text: String, reply: Option<i64>) {
-    let end_point: String = format!("https://api.telegram.org/bot{}/sendMessage", bot_token);
-    let body = serde_json::json!({
-        "chat_id": target_chat,
-        "text": text,
-        "reply_to_message_id": reply
-    });
-    let client = reqwest::Client::new();
-    client.post(end_point).json(&body).send().await.unwrap();
-}
-
-async fn reply_inline_keyboard(
-    bot_token: &str,
-    target_chat: i64,
-    text: String,
-    reply: i64,
-    buttons: Vec<telegram_types::InlineKeyboardButton>,
-) {
-    let end_point: String = format!("https://api.telegram.org/bot{}/sendMessage", bot_token);
-    let body = serde_json::json!({
-        "chat_id": target_chat,
-        "text": text,
-        "reply_to_message_id": reply,
-        "reply_markup": {
-            "inline_keyboard": [buttons]
-        }
-    });
-    let client = reqwest::Client::new();
-    client.post(end_point).json(&body).send().await.unwrap();
-}
-
-async fn remove_inline_keyboard(bot_token: &str, target_chat: i64, text: String, message_id: i64) {
-    let end_point: String = format!("https://api.telegram.org/bot{}/editMessageText", bot_token);
-    let body = serde_json::json!({
-        "chat_id": target_chat,
-        "message_id": message_id,
-        "text": text,
-        "reply_markup": {
-            "inline_keyboard": [[]]
-        }
-    });
-    let client = reqwest::Client::new();
-    client.post(end_point).json(&body).send().await.unwrap();
-}
-
-mod game_model;
-
 type GameStateStorage = Arc<DashMap<i64, game_model::GameState>>;
 
-async fn handle_private_message(bot_token: &str, message: telegram_types::Message) {
-    send_message(
-        bot_token,
-        message.chat.id,
-        r"Add this bot to groups to enjoy the Pig (dice) game!".to_string(),
-        None,
-    )
-    .await;
+async fn handle_private_message(
+    message_sender: message_action::MessageSender,
+    message: telegram_types::Message,
+) {
+    message_sender
+        .send(message_action::MessageAction::Send(
+            message_action::MessageInfo {
+                chat_id: message.chat.id,
+                text: "Add this bot to groups to enjoy the Pig (dice) game!".to_string(),
+                message_id: None,
+                reply_to_message_id: None,
+                reply_markup: None,
+            },
+        ))
+        .await;
 }
 
 async fn handle_group_message(
-    bot_token: &str,
+    message_sender: message_action::MessageSender,
     message: telegram_types::Message,
     storage: GameStateStorage,
 ) {
@@ -73,29 +35,36 @@ async fn handle_group_message(
         .entry(message.chat.id)
         .or_insert(game_model::GameState::New(game_model::NewGame::new()));
 
+    let mut actions = vec![];
     match message.dice {
         None => {
             for command in message.get_commands() {
-                game.handle_command(bot_token, &message, command.as_str())
-                    .await;
+                actions.extend(game.handle_command(&message, command.as_str()));
             }
         }
         Some(ref dice) => {
             if matches!(dice.get_type(), telegram_types::DiceType::Dice)
                 && message.forward_date.is_none()
             {
-                game.handle_dice(bot_token, &message, dice.value as u8)
-                    .await;
-            }
+                actions.extend(game.handle_dice(&message, dice.value as u8));
+            };
         }
+    };
+
+    for action in actions {
+        message_sender.send(action).await;
     }
 }
 
-async fn handle(bot_token: String, update: telegram_types::Update, storage: GameStateStorage) {
+async fn handle(
+    message_sender: message_action::MessageSender,
+    update: telegram_types::Update,
+    storage: GameStateStorage,
+) {
     if let Some(message) = update.message {
         match message.chat.chat_type.as_str() {
-            "group" | "supergroup" => handle_group_message(&bot_token, message, storage).await,
-            "private" => handle_private_message(&bot_token, message).await,
+            "group" | "supergroup" => handle_group_message(message_sender, message, storage).await,
+            "private" => handle_private_message(message_sender, message).await,
             _ => (),
         }
     } else if let Some(callback_query) = update.callback_query {
@@ -103,16 +72,20 @@ async fn handle(bot_token: String, update: telegram_types::Update, storage: Game
             match storage.entry(message.chat.id) {
                 Entry::Occupied(mut occupied) => {
                     let game = occupied.get_mut();
-                    game.handle_callback_query(&bot_token, &message, callback_query.data).await
-                },
+                    for action in game.handle_callback_query(&message, callback_query.data) {
+                        message_sender.send(action).await;
+                    }
+                }
                 Entry::Vacant(_) => (),
-            }
-        }
-    }
+            };
+        };
+    };
 }
 
 #[tokio::main]
 async fn main() {
+    let subscriber = tracing_subscriber::FmtSubscriber::new();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
     let bot_token: String = env::var("BOT_TOKEN").unwrap();
     let storage = GameStateStorage::new(DashMap::new());
 
@@ -122,8 +95,15 @@ async fn main() {
         .and(warp::any().map(move || bot_token.clone()))
         .and_then(
             |body: serde_json::Value, storage: GameStateStorage, bot_token: String| async {
-                let update: telegram_types::Update = serde_json::value::from_value(body).unwrap();
-                handle(bot_token, update, storage).await;
+                match serde_json::value::from_value::<telegram_types::Update>(body) {
+                    Ok(update) => {
+                        let message_sender = message_action::MessageSender::new(bot_token);
+                        handle(message_sender, update, storage).await;
+                    },
+                    Err(err) => {
+                        tracing::error!("Can not parse Telegram request body, error: {}", err);
+                    }
+                };
                 Ok::<_, std::convert::Infallible>(warp::reply())
             },
         );
