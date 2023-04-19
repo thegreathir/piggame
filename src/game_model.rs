@@ -190,9 +190,16 @@ impl GameState {
         }
     }
 
-    fn get_current_player(&self) -> Option<&Player> {
+    fn get_playing_game(&self) -> Option<&PlayingGame> {
         match self {
-            GameState::Playing(playing_game) => Some(playing_game.get_current_player()),
+            GameState::Playing(playing_game) => Some(playing_game),
+            _ => None,
+        }
+    }
+
+    fn get_playing_game_mut(&mut self) -> Option<&mut PlayingGame> {
+        match self {
+            GameState::Playing(playing_game) => Some(playing_game),
             _ => None,
         }
     }
@@ -203,7 +210,7 @@ impl GameState {
                 if new_game.players.len() >= 2 {
                     let playing_game = PlayingGame::from(std::mem::take(new_game));
                     *self = GameState::Playing(playing_game);
-                    Ok(self.get_current_player().unwrap())
+                    Ok(self.get_playing_game().unwrap().get_current_player())
                 } else {
                     Err(GameLogicError::NotEnoughPlayers)
                 }
@@ -217,43 +224,37 @@ impl GameState {
     }
 
     fn add_dice(&mut self, user_id: i64, value: u8) -> Result<AddDiceResult<'_>, GameLogicError> {
-        match self {
-            GameState::Playing(playing_game) => {
-                playing_game.check_turn(user_id)?;
-                if value == 1 {
-                    playing_game.advance_turn();
-                    Ok(AddDiceResult::TurnLost(
-                        playing_game.get_current_player(),
-                    ))
-                } else {
-                    playing_game.current_score += value;
-                    if playing_game.get_current_player().score + playing_game.current_score >= 100 {
-                        playing_game.get_current_player_mut().score += playing_game.current_score;
-                        playing_game.current_score = 0;
-                        Ok(AddDiceResult::Finished)
-                    } else {
-                        Ok(AddDiceResult::Continue(
-                            playing_game.get_current_player(),
-                            playing_game.current_score,
-                        ))
-                    }
-                }
+        let playing_game = self
+            .get_playing_game_mut()
+            .ok_or(GameLogicError::IsNotPlaying)?;
+        playing_game.check_turn(user_id)?;
+        if value == 1 {
+            playing_game.advance_turn();
+            Ok(AddDiceResult::TurnLost(playing_game.get_current_player()))
+        } else {
+            playing_game.current_score += value;
+            if playing_game.get_current_player().score + playing_game.current_score >= 100 {
+                playing_game.get_current_player_mut().score += playing_game.current_score;
+                playing_game.current_score = 0;
+                Ok(AddDiceResult::Finished)
+            } else {
+                Ok(AddDiceResult::Continue(
+                    playing_game.get_current_player(),
+                    playing_game.current_score,
+                ))
             }
-            GameState::New(_) => Err(GameLogicError::IsNotPlaying),
         }
     }
 
     fn hold(&mut self, user_id: i64) -> Result<(u8, &Player), GameLogicError> {
-        match self {
-            GameState::Playing(playing_game) => {
-                playing_game.check_turn(user_id)?;
-                playing_game.get_current_player_mut().score += playing_game.current_score;
-                let result = playing_game.get_current_player().score;
-                playing_game.advance_turn();
-                Ok((result, playing_game.get_current_player()))
-            }
-            GameState::New(_) => Err(GameLogicError::IsNotPlaying),
-        }
+        let playing_game = self
+            .get_playing_game_mut()
+            .ok_or(GameLogicError::IsNotPlaying)?;
+        playing_game.check_turn(user_id)?;
+        playing_game.get_current_player_mut().score += playing_game.current_score;
+        let result = playing_game.get_current_player().score;
+        playing_game.advance_turn();
+        Ok((result, playing_game.get_current_player()))
     }
 
     fn send_results(&self, chat_id: i64) -> message_action::MessageAction {
