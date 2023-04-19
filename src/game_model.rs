@@ -60,7 +60,7 @@ impl NewGame {
         }
     }
 
-    fn send_players(&self, chat_id: i64) -> message_action::MessageAction {
+    fn send_players(&self) -> message_action::MessageAction {
         let text = if self.players.is_empty() {
             "No players!".to_string()
         } else {
@@ -70,9 +70,7 @@ impl NewGame {
             format!("Players:{}", players_text)
         };
         message_action::MessageAction::Send(message_action::MessageInfo {
-            chat_id,
             text,
-            message_id: None,
             reply_to_message_id: None,
             reply_markup: None,
         })
@@ -119,7 +117,7 @@ impl PlayingGame {
         self.turn %= self.players.len() as u8;
     }
 
-    fn send_results(&self, chat_id: i64) -> message_action::MessageAction {
+    fn send_results(&self) -> message_action::MessageAction {
         let players_text =
             self.players
                 .iter()
@@ -144,9 +142,7 @@ impl PlayingGame {
                     }
                 });
         message_action::MessageAction::Send(message_action::MessageInfo {
-            chat_id,
             text: format!("Scores:{}", players_text),
-            message_id: None,
             reply_to_message_id: None,
             reply_markup: None,
         })
@@ -257,10 +253,10 @@ impl GameState {
         Ok((result, playing_game.get_current_player()))
     }
 
-    fn send_results(&self, chat_id: i64) -> message_action::MessageAction {
+    fn send_results(&self) -> message_action::MessageAction {
         match self {
-            GameState::New(new_game) => new_game.send_players(chat_id),
-            GameState::Playing(playing_game) => playing_game.send_results(chat_id),
+            GameState::New(new_game) => new_game.send_players(),
+            GameState::Playing(playing_game) => playing_game.send_results(),
         }
     }
 
@@ -272,23 +268,19 @@ impl GameState {
         if let Some(sender) = &message.from {
             match self.add_dice(sender.id, dice_value) {
                 Ok(AddDiceResult::Finished) => {
-                    let action = self.send_results(message.chat.id);
+                    let action = self.send_results();
                     self.reset();
                     vec![action]
                 }
                 Ok(AddDiceResult::TurnLost(current_player)) => {
                     vec![
                         message_action::MessageAction::Send(message_action::MessageInfo {
-                            chat_id: message.chat.id,
                             text: "Oops!".to_string(),
-                            message_id: None,
                             reply_to_message_id: Some(message.message_id),
                             reply_markup: None,
                         }),
                         message_action::MessageAction::Send(message_action::MessageInfo {
-                            chat_id: message.chat.id,
                             text: format!("Your turn: {}", current_player.get_mention_string()),
-                            message_id: None,
                             reply_to_message_id: None,
                             reply_markup: None,
                         }),
@@ -297,14 +289,12 @@ impl GameState {
                 Ok(AddDiceResult::Continue(current_player, current_score)) => {
                     vec![message_action::MessageAction::Send(
                         message_action::MessageInfo {
-                            chat_id: message.chat.id,
                             text: format!(
                                 "{} + {} = {}",
                                 current_player.score,
                                 current_score,
                                 current_player.score + current_score
                             ),
-                            message_id: None,
                             reply_to_message_id: Some(message.message_id),
                             reply_markup: None,
                         },
@@ -332,9 +322,7 @@ impl GameState {
                         Ok(_) => {
                             vec![message_action::MessageAction::Send(
                                 message_action::MessageInfo {
-                                    chat_id: message.chat.id,
                                     text: "Joined successfully ;)".to_string(),
-                                    message_id: None,
                                     reply_to_message_id: Some(message.message_id),
                                     reply_markup: None,
                                 },
@@ -343,9 +331,7 @@ impl GameState {
                         Err(GameLogicError::JoinAfterPlay) => {
                             vec![message_action::MessageAction::Send(
                                 message_action::MessageInfo {
-                                    chat_id: message.chat.id,
                                     text: "Game is already started :(".to_string(),
-                                    message_id: None,
                                     reply_to_message_id: Some(message.message_id),
                                     reply_markup: None,
                                 },
@@ -354,9 +340,7 @@ impl GameState {
                         Err(GameLogicError::AlreadyJoined) => {
                             vec![message_action::MessageAction::Send(
                                 message_action::MessageInfo {
-                                    chat_id: message.chat.id,
                                     text: "You have joined already :)".to_string(),
-                                    message_id: None,
                                     reply_to_message_id: Some(message.message_id),
                                     reply_markup: None,
                                 },
@@ -369,12 +353,10 @@ impl GameState {
                     Ok(current_player) => {
                         vec![message_action::MessageAction::Send(
                             message_action::MessageInfo {
-                                chat_id: message.chat.id,
                                 text: format!(
                                     "Started successfully. Turn: {}",
                                     current_player.get_mention_string()
                                 ),
-                                message_id: None,
                                 reply_to_message_id: Some(message.message_id),
                                 reply_markup: None,
                             },
@@ -383,9 +365,7 @@ impl GameState {
                     Err(GameLogicError::AlreadyPlaying) => {
                         vec![message_action::MessageAction::Send(
                             message_action::MessageInfo {
-                                chat_id: message.chat.id,
                                 text: "Game is already started :(".to_string(),
-                                message_id: None,
                                 reply_to_message_id: Some(message.message_id),
                                 reply_markup: None,
                             },
@@ -394,9 +374,7 @@ impl GameState {
                     Err(GameLogicError::NotEnoughPlayers) => {
                         vec![message_action::MessageAction::Send(
                             message_action::MessageInfo {
-                                chat_id: message.chat.id,
                                 text: "Not enough players joined yet :(".to_string(),
-                                message_id: None,
                                 reply_to_message_id: Some(message.message_id),
                                 reply_markup: None,
                             },
@@ -408,13 +386,11 @@ impl GameState {
                     Ok((score, current_player)) => {
                         vec![message_action::MessageAction::Send(
                             message_action::MessageInfo {
-                                chat_id: message.chat.id,
                                 text: format!(
                                     "Your score is {}. Turn: {}",
                                     score,
                                     current_player.get_mention_string()
                                 ),
-                                message_id: None,
                                 reply_to_message_id: Some(message.message_id),
                                 reply_markup: None,
                             },
@@ -423,9 +399,7 @@ impl GameState {
                     Err(GameLogicError::IsNotPlaying) => {
                         vec![message_action::MessageAction::Send(
                             message_action::MessageInfo {
-                                chat_id: message.chat.id,
                                 text: "Game is not started yet :(".to_string(),
-                                message_id: None,
                                 reply_to_message_id: Some(message.message_id),
                                 reply_markup: None,
                             },
@@ -434,9 +408,7 @@ impl GameState {
                     Err(GameLogicError::WrongTurn) => {
                         vec![message_action::MessageAction::Send(
                             message_action::MessageInfo {
-                                chat_id: message.chat.id,
                                 text: "This is not your turn :(".to_string(),
-                                message_id: None,
                                 reply_to_message_id: Some(message.message_id),
                                 reply_markup: None,
                             },
@@ -445,14 +417,12 @@ impl GameState {
                     Err(_) => vec![],
                 },
                 "/result" | "/result@piiigdicegamebot" => {
-                    vec![self.send_results(message.chat.id)]
+                    vec![self.send_results()]
                 }
                 "/reset" | "/reset@piiigdicegamebot" => {
                     vec![message_action::MessageAction::Send(
                         message_action::MessageInfo {
-                            chat_id: message.chat.id,
                             text: "Are you sure?".to_string(),
-                            message_id: None,
                             reply_to_message_id: Some(message.message_id),
                             reply_markup: Some(telegram_types::ReplyMarkup {
                                 inline_keyboard: Some(vec![vec![
@@ -482,14 +452,15 @@ impl GameState {
                 self.reset();
 
                 vec![message_action::MessageAction::Edit(
-                    message_action::MessageInfo {
-                        chat_id: message.chat.id,
-                        text: "Game is reset (players should join again).".to_string(),
-                        message_id: Some(message.message_id),
-                        reply_to_message_id: None,
-                        reply_markup: Some(telegram_types::ReplyMarkup {
-                            inline_keyboard: Some(vec![vec![]]),
-                        }),
+                    message_action::EditMessageInfo {
+                        message_id: message.message_id,
+                        message_info: message_action::MessageInfo {
+                            text: "Game is reset (players should join again).".to_string(),
+                            reply_to_message_id: None,
+                            reply_markup: Some(telegram_types::ReplyMarkup {
+                                inline_keyboard: Some(vec![vec![]]),
+                            }),
+                        },
                     },
                 )]
             } else {

@@ -14,15 +14,14 @@ async fn handle_private_message(
     message: telegram_types::Message,
 ) {
     message_sender
-        .send(message_action::MessageAction::Send(
-            message_action::MessageInfo {
-                chat_id: message.chat.id,
+        .send(
+            message.chat.id,
+            message_action::MessageAction::Send(message_action::MessageInfo {
                 text: "Add this bot to groups to enjoy the Pig (dice) game!".to_string(),
-                message_id: None,
                 reply_to_message_id: None,
                 reply_markup: None,
-            },
-        ))
+            }),
+        )
         .await;
 }
 
@@ -52,7 +51,7 @@ async fn handle_group_message(
     };
 
     for action in actions {
-        message_sender.send(action).await;
+        message_sender.send(message.chat.id, action).await;
     }
 }
 
@@ -73,7 +72,7 @@ async fn handle(
                 Entry::Occupied(mut occupied) => {
                     let game = occupied.get_mut();
                     for action in game.handle_callback_query(&message, callback_query.data) {
-                        message_sender.send(action).await;
+                        message_sender.send(message.chat.id, action).await;
                     }
                 }
                 Entry::Vacant(_) => (),
@@ -99,7 +98,7 @@ async fn main() {
                     Ok(update) => {
                         let message_sender = message_action::MessageSender::new(bot_token);
                         handle(message_sender, update, storage).await;
-                    },
+                    }
                     Err(err) => {
                         tracing::error!("Can not parse Telegram request body, error: {}", err);
                     }
