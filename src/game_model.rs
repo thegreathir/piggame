@@ -4,7 +4,6 @@ use super::text_messages;
 use rand::seq::SliceRandom;
 use std::collections::HashMap;
 
-#[derive(Clone)]
 struct Player {
     user_id: i64,
     name: String,
@@ -43,12 +42,13 @@ enum GameLogicError {
     AlreadyJoined,
 }
 
-enum AddDiceResult {
+enum AddDiceResult<'a> {
     Finished,
-    TurnLost(Player),
-    Continue(Player, u8),
+    TurnLost(&'a Player),
+    Continue(&'a Player, u8),
 }
 
+#[derive(Default)]
 pub struct NewGame {
     players: HashMap<i64, Player>,
 }
@@ -86,8 +86,8 @@ pub struct PlayingGame {
 }
 
 impl PlayingGame {
-    fn from(new_game: &NewGame) -> PlayingGame {
-        let mut players: Vec<Player> = new_game.players.values().cloned().collect();
+    fn from(new_game: NewGame) -> PlayingGame {
+        let mut players: Vec<Player> = new_game.players.into_values().collect();
         let mut rng = rand::thread_rng();
         players.shuffle(&mut rng);
         PlayingGame {
@@ -98,11 +98,11 @@ impl PlayingGame {
     }
 
     fn get_current_player_mut(&mut self) -> &mut Player {
-        self.players.get_mut(self.turn as usize).unwrap()
+        &mut self.players[self.turn as usize]
     }
 
     fn get_current_player(&self) -> &Player {
-        self.players.get(self.turn as usize).unwrap()
+        &self.players[self.turn as usize]
     }
 
     fn check_turn(&self, user_id: i64) -> Result<(), GameLogicError> {
@@ -190,14 +190,20 @@ impl GameState {
         }
     }
 
-    fn play(&mut self) -> Result<Player, GameLogicError> {
+    fn get_current_player(&self) -> Option<&Player> {
+        match self {
+            GameState::Playing(playing_game) => Some(playing_game.get_current_player()),
+            _ => None,
+        }
+    }
+
+    fn play(&mut self) -> Result<&Player, GameLogicError> {
         match self {
             GameState::New(new_game) => {
                 if new_game.players.len() >= 2 {
-                    let playing_game = PlayingGame::from(new_game);
-                    let current_player = playing_game.get_current_player().clone();
+                    let playing_game = PlayingGame::from(std::mem::take(new_game));
                     *self = GameState::Playing(playing_game);
-                    Ok(current_player)
+                    Ok(self.get_current_player().unwrap())
                 } else {
                     Err(GameLogicError::NotEnoughPlayers)
                 }
@@ -210,14 +216,14 @@ impl GameState {
         *self = GameState::new();
     }
 
-    fn add_dice(&mut self, user_id: i64, value: u8) -> Result<AddDiceResult, GameLogicError> {
+    fn add_dice(&mut self, user_id: i64, value: u8) -> Result<AddDiceResult<'_>, GameLogicError> {
         match self {
             GameState::Playing(playing_game) => {
                 playing_game.check_turn(user_id)?;
                 if value == 1 {
                     playing_game.advance_turn();
                     Ok(AddDiceResult::TurnLost(
-                        playing_game.get_current_player().clone(),
+                        playing_game.get_current_player(),
                     ))
                 } else {
                     playing_game.current_score += value;
@@ -227,7 +233,7 @@ impl GameState {
                         Ok(AddDiceResult::Finished)
                     } else {
                         Ok(AddDiceResult::Continue(
-                            playing_game.get_current_player().clone(),
+                            playing_game.get_current_player(),
                             playing_game.current_score,
                         ))
                     }
@@ -237,14 +243,14 @@ impl GameState {
         }
     }
 
-    fn hold(&mut self, user_id: i64) -> Result<(u8, Player), GameLogicError> {
+    fn hold(&mut self, user_id: i64) -> Result<(u8, &Player), GameLogicError> {
         match self {
             GameState::Playing(playing_game) => {
                 playing_game.check_turn(user_id)?;
                 playing_game.get_current_player_mut().score += playing_game.current_score;
                 let result = playing_game.get_current_player().score;
                 playing_game.advance_turn();
-                Ok((result, playing_game.get_current_player().clone()))
+                Ok((result, playing_game.get_current_player()))
             }
             GameState::New(_) => Err(GameLogicError::IsNotPlaying),
         }
