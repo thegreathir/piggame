@@ -42,6 +42,25 @@ enum GameLogicError {
     AlreadyJoined,
 }
 
+impl GameLogicError {
+    fn get_reply_message(&self, reply_to_message_id: i64) -> message_action::MessageAction {
+        let text = match self {
+            Self::JoinAfterPlay => "You can not join when game is started! Wait for next round ;)",
+            Self::AlreadyJoined => "You have joined already :)",
+            Self::AlreadyPlaying => "Game is already started :(",
+            Self::NotEnoughPlayers => "Not enough players joined yet :(",
+            Self::IsNotPlaying => "Game is not started yet :(",
+            Self::WrongTurn => "This is not your turn :(",
+        }
+        .to_string();
+        message_action::MessageAction::Send(message_action::MessageInfo {
+            text,
+            reply_to_message_id: Some(reply_to_message_id),
+            reply_markup: None,
+        })
+    }
+}
+
 enum AddDiceResult<'a> {
     Finished,
     TurnLost(&'a Player),
@@ -328,25 +347,9 @@ impl GameState {
                                 },
                             )]
                         }
-                        Err(GameLogicError::JoinAfterPlay) => {
-                            vec![message_action::MessageAction::Send(
-                                message_action::MessageInfo {
-                                    text: "Game is already started :(".to_string(),
-                                    reply_to_message_id: Some(message.message_id),
-                                    reply_markup: None,
-                                },
-                            )]
+                        Err(err) => {
+                            vec![err.get_reply_message(message.message_id)]
                         }
-                        Err(GameLogicError::AlreadyJoined) => {
-                            vec![message_action::MessageAction::Send(
-                                message_action::MessageInfo {
-                                    text: "You have joined already :)".to_string(),
-                                    reply_to_message_id: Some(message.message_id),
-                                    reply_markup: None,
-                                },
-                            )]
-                        }
-                        Err(_) => vec![],
                     }
                 }
                 "/play" | "/play@piiigdicegamebot" => match self.play() {
@@ -362,25 +365,9 @@ impl GameState {
                             },
                         )]
                     }
-                    Err(GameLogicError::AlreadyPlaying) => {
-                        vec![message_action::MessageAction::Send(
-                            message_action::MessageInfo {
-                                text: "Game is already started :(".to_string(),
-                                reply_to_message_id: Some(message.message_id),
-                                reply_markup: None,
-                            },
-                        )]
+                    Err(err) => {
+                        vec![err.get_reply_message(message.message_id)]
                     }
-                    Err(GameLogicError::NotEnoughPlayers) => {
-                        vec![message_action::MessageAction::Send(
-                            message_action::MessageInfo {
-                                text: "Not enough players joined yet :(".to_string(),
-                                reply_to_message_id: Some(message.message_id),
-                                reply_markup: None,
-                            },
-                        )]
-                    }
-                    Err(_) => vec![],
                 },
                 "/hold" | "/hold@piiigdicegamebot" => match self.hold(sender.id) {
                     Ok((score, current_player)) => {
@@ -396,25 +383,9 @@ impl GameState {
                             },
                         )]
                     }
-                    Err(GameLogicError::IsNotPlaying) => {
-                        vec![message_action::MessageAction::Send(
-                            message_action::MessageInfo {
-                                text: "Game is not started yet :(".to_string(),
-                                reply_to_message_id: Some(message.message_id),
-                                reply_markup: None,
-                            },
-                        )]
+                    Err(err) => {
+                        vec![err.get_reply_message(message.message_id)]
                     }
-                    Err(GameLogicError::WrongTurn) => {
-                        vec![message_action::MessageAction::Send(
-                            message_action::MessageInfo {
-                                text: "This is not your turn :(".to_string(),
-                                reply_to_message_id: Some(message.message_id),
-                                reply_markup: None,
-                            },
-                        )]
-                    }
-                    Err(_) => vec![],
                 },
                 "/result" | "/result@piiigdicegamebot" => {
                     vec![self.send_results()]
