@@ -5,7 +5,7 @@ use rand::seq::SliceRandom;
 use std::collections::HashMap;
 
 struct Player {
-    user_id: i64,
+    user_id: telegram_types::UserId,
     name: String,
     username: Option<String>,
     score: u8,
@@ -43,7 +43,10 @@ enum GameLogicError {
 }
 
 impl GameLogicError {
-    fn get_reply_message(&self, reply_to_message_id: i64) -> message_action::MessageAction {
+    fn get_reply_message(
+        &self,
+        reply_to_message_id: telegram_types::MessageId,
+    ) -> message_action::MessageAction {
         let text = match self {
             Self::JoinAfterPlay => "You can not join when game is started! Wait for next round ;)",
             Self::AlreadyJoined => "You have joined already :)",
@@ -69,7 +72,7 @@ enum AddDiceResult<'a> {
 
 #[derive(Default)]
 pub struct NewGame {
-    players: HashMap<i64, Player>,
+    players: HashMap<telegram_types::UserId, Player>,
 }
 
 impl NewGame {
@@ -122,7 +125,7 @@ impl PlayingGame {
         &self.players[self.turn as usize]
     }
 
-    fn check_turn(&self, user_id: i64) -> Result<(), GameLogicError> {
+    fn check_turn(&self, user_id: telegram_types::UserId) -> Result<(), GameLogicError> {
         if user_id != self.get_current_player().user_id {
             Err(GameLogicError::WrongTurn)
         } else {
@@ -181,7 +184,7 @@ impl GameState {
 
     fn join(
         &mut self,
-        user_id: i64,
+        user_id: telegram_types::UserId,
         username: Option<String>,
         name: String,
     ) -> Result<(), GameLogicError> {
@@ -238,9 +241,12 @@ impl GameState {
         *self = GameState::new();
     }
 
-    fn add_dice(&mut self, user_id: i64, value: u8) -> Result<AddDiceResult<'_>, GameLogicError> {
-        let playing_game = self
-            .get_playing_game_mut()?;
+    fn add_dice(
+        &mut self,
+        user_id: telegram_types::UserId,
+        value: u8,
+    ) -> Result<AddDiceResult<'_>, GameLogicError> {
+        let playing_game = self.get_playing_game_mut()?;
         playing_game.check_turn(user_id)?;
         if value == 1 {
             playing_game.advance_turn();
@@ -260,9 +266,8 @@ impl GameState {
         }
     }
 
-    fn hold(&mut self, user_id: i64) -> Result<(u8, &Player), GameLogicError> {
-        let playing_game = self
-            .get_playing_game_mut()?;
+    fn hold(&mut self, user_id: telegram_types::UserId) -> Result<(u8, &Player), GameLogicError> {
+        let playing_game = self.get_playing_game_mut()?;
         playing_game.check_turn(user_id)?;
         playing_game.get_current_player_mut().score += playing_game.current_score;
         let result = playing_game.get_current_player().score;

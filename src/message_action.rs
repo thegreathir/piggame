@@ -5,14 +5,14 @@ use serde::Serialize;
 pub struct MessageInfo {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reply_to_message_id: Option<i64>,
+    pub reply_to_message_id: Option<telegram_types::MessageId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_markup: Option<telegram_types::ReplyMarkup>,
 }
 
 #[derive(Serialize)]
 pub struct EditMessageInfo {
-    pub message_id: i64,
+    pub message_id: telegram_types::MessageId,
     #[serde(flatten)]
     pub message_info: MessageInfo,
 }
@@ -29,7 +29,7 @@ pub struct MessageSender {
 
 #[derive(Serialize)]
 struct ChatMessage<Info: Serialize> {
-    chat_id: i64,
+    chat_id: telegram_types::ChatId,
     #[serde(flatten)]
     info: Info,
 }
@@ -42,7 +42,7 @@ impl MessageSender {
         }
     }
 
-    pub async fn send(&self, chat_id: i64, action: MessageAction) {
+    pub async fn send(&self, chat_id: telegram_types::ChatId, action: MessageAction) {
         let result = match action {
             MessageAction::Send(info) => {
                 self.client

@@ -7,7 +7,7 @@ mod message_action;
 mod telegram_types;
 mod text_messages;
 
-type GameStateStorage = Arc<DashMap<i64, game_model::GameState>>;
+type GameStateStorage = Arc<DashMap<telegram_types::ChatId, game_model::GameState>>;
 
 async fn handle_private_message(
     message_sender: message_action::MessageSender,

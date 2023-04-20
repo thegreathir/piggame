@@ -1,8 +1,24 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
+#[serde(transparent)]
+pub struct MessageId(i64);
+
+#[derive(Deserialize, PartialEq, Eq, Hash, Clone, Copy)]
+#[serde(transparent)]
+pub struct UserId(i64);
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Copy)]
+#[serde(transparent)]
+pub struct ChatId(i64);
+
+#[derive(Deserialize, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct UpdateId(i64);
+
 #[derive(Deserialize)]
 pub struct User {
-    pub id: i64,
+    pub id: UserId,
     pub first_name: String,
     pub last_name: Option<String>,
     pub username: Option<String>,
@@ -22,7 +38,7 @@ pub enum ChatType {
 
 #[derive(Deserialize)]
 pub struct Chat {
-    pub id: i64,
+    pub id: ChatId,
     #[serde(rename = "type")]
     pub chat_type: ChatType,
     pub username: Option<String>,
@@ -73,7 +89,7 @@ pub struct ReplyMarkup {
 
 #[derive(Deserialize)]
 pub struct Message {
-    pub message_id: i64,
+    pub message_id: MessageId,
     pub from: Option<User>,
     pub chat: Chat,
     pub text: Option<String>,
@@ -105,7 +121,7 @@ pub struct CallbackQuery {
 
 #[derive(Deserialize)]
 pub struct Update {
-    pub update_id: i64,
+    pub update_id: UpdateId,
     pub message: Option<Message>,
     pub callback_query: Option<CallbackQuery>,
 }
