@@ -205,17 +205,17 @@ impl GameState {
         }
     }
 
-    fn get_playing_game(&self) -> Option<&PlayingGame> {
+    fn get_playing_game(&self) -> Result<&PlayingGame, GameLogicError> {
         match self {
-            GameState::Playing(playing_game) => Some(playing_game),
-            _ => None,
+            GameState::Playing(playing_game) => Ok(playing_game),
+            _ => Err(GameLogicError::IsNotPlaying),
         }
     }
 
-    fn get_playing_game_mut(&mut self) -> Option<&mut PlayingGame> {
+    fn get_playing_game_mut(&mut self) -> Result<&mut PlayingGame, GameLogicError> {
         match self {
-            GameState::Playing(playing_game) => Some(playing_game),
-            _ => None,
+            GameState::Playing(playing_game) => Ok(playing_game),
+            _ => Err(GameLogicError::IsNotPlaying),
         }
     }
 
@@ -240,8 +240,7 @@ impl GameState {
 
     fn add_dice(&mut self, user_id: i64, value: u8) -> Result<AddDiceResult<'_>, GameLogicError> {
         let playing_game = self
-            .get_playing_game_mut()
-            .ok_or(GameLogicError::IsNotPlaying)?;
+            .get_playing_game_mut()?;
         playing_game.check_turn(user_id)?;
         if value == 1 {
             playing_game.advance_turn();
@@ -263,8 +262,7 @@ impl GameState {
 
     fn hold(&mut self, user_id: i64) -> Result<(u8, &Player), GameLogicError> {
         let playing_game = self
-            .get_playing_game_mut()
-            .ok_or(GameLogicError::IsNotPlaying)?;
+            .get_playing_game_mut()?;
         playing_game.check_turn(user_id)?;
         playing_game.get_current_player_mut().score += playing_game.current_score;
         let result = playing_game.get_current_player().score;
