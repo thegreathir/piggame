@@ -42,7 +42,7 @@ async fn handle_group_message(
             }
         }
         Some(ref dice) => {
-            if matches!(dice.get_type(), telegram_types::DiceType::Dice)
+            if matches!(dice.emoji, telegram_types::DiceType::Dice)
                 && message.forward_date.is_none()
             {
                 actions.extend(game.handle_dice(&message, dice.value as u8));
@@ -61,9 +61,13 @@ async fn handle(
     storage: GameStateStorage,
 ) {
     if let Some(message) = update.message {
-        match message.chat.chat_type.as_str() {
-            "group" | "supergroup" => handle_group_message(message_sender, message, storage).await,
-            "private" => handle_private_message(message_sender, message).await,
+        match message.chat.chat_type {
+            telegram_types::ChatType::Group | telegram_types::ChatType::SuperGroup => {
+                handle_group_message(message_sender, message, storage).await
+            }
+            telegram_types::ChatType::Private => {
+                handle_private_message(message_sender, message).await
+            }
             _ => (),
         }
     } else if let Some(callback_query) = update.callback_query {

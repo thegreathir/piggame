@@ -9,10 +9,22 @@ pub struct User {
 }
 
 #[derive(Deserialize)]
+pub enum ChatType {
+    #[serde(rename = "private")]
+    Private,
+    #[serde(rename = "group")]
+    Group,
+    #[serde(rename = "supergroup")]
+    SuperGroup,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Deserialize)]
 pub struct Chat {
     pub id: i64,
     #[serde(rename = "type")]
-    pub chat_type: String,
+    pub chat_type: ChatType,
     pub username: Option<String>,
 }
 
@@ -25,33 +37,27 @@ pub struct MessageEntity {
 }
 
 #[derive(Deserialize)]
-pub struct Dice {
-    pub emoji: String,
-    pub value: i64,
-}
-
 pub enum DiceType {
-    Unknown,
+    #[serde(rename = "🎲")]
     Dice,
+    #[serde(rename = "🎯")]
     Dart,
+    #[serde(rename = "🎰")]
     Bowling,
+    #[serde(rename = "🎳")]
     Basketball,
+    #[serde(rename = "🏀")]
     Football,
+    #[serde(rename = "⚽")]
     SlotMachine,
+    #[serde(other)]
+    Unknown,
 }
 
-impl Dice {
-    pub fn get_type(&self) -> DiceType {
-        match self.emoji.as_str() {
-            "🎲" => DiceType::Dice,
-            "🎯" => DiceType::Dart,
-            "🎰" => DiceType::SlotMachine,
-            "🎳" => DiceType::Bowling,
-            "🏀" => DiceType::Basketball,
-            "⚽" => DiceType::Football,
-            _ => DiceType::Unknown,
-        }
-    }
+#[derive(Deserialize)]
+pub struct Dice {
+    pub emoji: DiceType,
+    pub value: i64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -62,7 +68,7 @@ pub struct InlineKeyboardButton {
 
 #[derive(Serialize, Deserialize)]
 pub struct ReplyMarkup {
-    pub inline_keyboard: Option<Vec<Vec<InlineKeyboardButton>>>
+    pub inline_keyboard: Option<Vec<Vec<InlineKeyboardButton>>>,
 }
 
 #[derive(Deserialize)]
