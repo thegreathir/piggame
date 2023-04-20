@@ -284,135 +284,129 @@ impl GameState {
 
     pub fn handle_dice(
         &mut self,
-        message: &telegram_types::Message,
+        message_id: telegram_types::MessageId,
+        sender: &telegram_types::User,
         dice_value: u8,
     ) -> Vec<message_action::MessageAction> {
-        if let Some(sender) = &message.from {
-            match self.add_dice(sender.id, dice_value) {
-                Ok(AddDiceResult::Finished) => {
-                    let action = self.send_results();
-                    self.reset();
-                    vec![action]
-                }
-                Ok(AddDiceResult::TurnLost(current_player)) => {
-                    vec![
-                        message_action::MessageAction::Send(message_action::MessageInfo {
-                            text: "Oops!".to_string(),
-                            reply_to_message_id: Some(message.message_id),
-                            reply_markup: None,
-                        }),
-                        message_action::MessageAction::Send(message_action::MessageInfo {
-                            text: format!("Your turn: {}", current_player.get_mention_string()),
-                            reply_to_message_id: None,
-                            reply_markup: None,
-                        }),
-                    ]
-                }
-                Ok(AddDiceResult::Continue(current_player, current_score)) => {
-                    vec![message_action::MessageAction::Send(
-                        message_action::MessageInfo {
-                            text: format!(
-                                "{} + {} = {}",
-                                current_player.score,
-                                current_score,
-                                current_player.score + current_score
-                            ),
-                            reply_to_message_id: Some(message.message_id),
-                            reply_markup: None,
-                        },
-                    )]
-                }
-                Err(_) => vec![],
+        match self.add_dice(sender.id, dice_value) {
+            Ok(AddDiceResult::Finished) => {
+                let action = self.send_results();
+                self.reset();
+                vec![action]
             }
-        } else {
-            vec![]
+            Ok(AddDiceResult::TurnLost(current_player)) => {
+                vec![
+                    message_action::MessageAction::Send(message_action::MessageInfo {
+                        text: "Oops!".to_string(),
+                        reply_to_message_id: Some(message_id),
+                        reply_markup: None,
+                    }),
+                    message_action::MessageAction::Send(message_action::MessageInfo {
+                        text: format!("Your turn: {}", current_player.get_mention_string()),
+                        reply_to_message_id: None,
+                        reply_markup: None,
+                    }),
+                ]
+            }
+            Ok(AddDiceResult::Continue(current_player, current_score)) => {
+                vec![message_action::MessageAction::Send(
+                    message_action::MessageInfo {
+                        text: format!(
+                            "{} + {} = {}",
+                            current_player.score,
+                            current_score,
+                            current_player.score + current_score
+                        ),
+                        reply_to_message_id: Some(message_id),
+                        reply_markup: None,
+                    },
+                )]
+            }
+            Err(_) => vec![],
         }
     }
     pub fn handle_command(
         &mut self,
-        message: &telegram_types::Message,
+        message_id: telegram_types::MessageId,
+        sender: &telegram_types::User,
         command: &str,
     ) -> Vec<message_action::MessageAction> {
-        if let Some(sender) = &message.from {
-            match command {
-                "/join" | "/join@piiigdicegamebot" => {
-                    match self.join(
-                        sender.id,
-                        sender.username.clone(),
-                        sender.first_name.clone(),
-                    ) {
-                        Ok(_) => {
-                            vec![message_action::MessageAction::Send(
-                                message_action::MessageInfo {
-                                    text: "Joined successfully ;)".to_string(),
-                                    reply_to_message_id: Some(message.message_id),
-                                    reply_markup: None,
-                                },
-                            )]
-                        }
-                        Err(err) => {
-                            vec![err.get_reply_message(message.message_id)]
-                        }
-                    }
-                }
-                "/play" | "/play@piiigdicegamebot" => match self.play() {
-                    Ok(current_player) => {
+        match command {
+            "/join" | "/join@piiigdicegamebot" => {
+                match self.join(
+                    sender.id,
+                    sender.username.clone(),
+                    sender.first_name.clone(),
+                ) {
+                    Ok(_) => {
                         vec![message_action::MessageAction::Send(
                             message_action::MessageInfo {
-                                text: format!(
-                                    "Started successfully. Turn: {}",
-                                    current_player.get_mention_string()
-                                ),
-                                reply_to_message_id: Some(message.message_id),
+                                text: "Joined successfully ;)".to_string(),
+                                reply_to_message_id: Some(message_id),
                                 reply_markup: None,
                             },
                         )]
                     }
                     Err(err) => {
-                        vec![err.get_reply_message(message.message_id)]
+                        vec![err.get_reply_message(message_id)]
                     }
-                },
-                "/hold" | "/hold@piiigdicegamebot" => match self.hold(sender.id) {
-                    Ok((score, current_player)) => {
-                        vec![message_action::MessageAction::Send(
-                            message_action::MessageInfo {
-                                text: format!(
-                                    "Your score is {}. Turn: {}",
-                                    score,
-                                    current_player.get_mention_string()
-                                ),
-                                reply_to_message_id: Some(message.message_id),
-                                reply_markup: None,
-                            },
-                        )]
-                    }
-                    Err(err) => {
-                        vec![err.get_reply_message(message.message_id)]
-                    }
-                },
-                "/result" | "/result@piiigdicegamebot" => {
-                    vec![self.send_results()]
                 }
-                "/reset" | "/reset@piiigdicegamebot" => {
+            }
+            "/play" | "/play@piiigdicegamebot" => match self.play() {
+                Ok(current_player) => {
                     vec![message_action::MessageAction::Send(
                         message_action::MessageInfo {
-                            text: "Are you sure?".to_string(),
-                            reply_to_message_id: Some(message.message_id),
-                            reply_markup: Some(telegram_types::ReplyMarkup {
-                                inline_keyboard: Some(vec![vec![
-                                    telegram_types::InlineKeyboardButton {
-                                        text: "Yes".to_string(),
-                                        callback_data: Some("reset".to_string()),
-                                    },
-                                ]]),
-                            }),
+                            text: format!(
+                                "Started successfully. Turn: {}",
+                                current_player.get_mention_string()
+                            ),
+                            reply_to_message_id: Some(message_id),
+                            reply_markup: None,
                         },
                     )]
                 }
-                _ => vec![],
+                Err(err) => {
+                    vec![err.get_reply_message(message_id)]
+                }
+            },
+            "/hold" | "/hold@piiigdicegamebot" => match self.hold(sender.id) {
+                Ok((score, current_player)) => {
+                    vec![message_action::MessageAction::Send(
+                        message_action::MessageInfo {
+                            text: format!(
+                                "Your score is {}. Turn: {}",
+                                score,
+                                current_player.get_mention_string()
+                            ),
+                            reply_to_message_id: Some(message_id),
+                            reply_markup: None,
+                        },
+                    )]
+                }
+                Err(err) => {
+                    vec![err.get_reply_message(message_id)]
+                }
+            },
+            "/result" | "/result@piiigdicegamebot" => {
+                vec![self.send_results()]
             }
-        } else {
-            vec![]
+            "/reset" | "/reset@piiigdicegamebot" => {
+                vec![message_action::MessageAction::Send(
+                    message_action::MessageInfo {
+                        text: "Are you sure?".to_string(),
+                        reply_to_message_id: Some(message_id),
+                        reply_markup: Some(telegram_types::ReplyMarkup {
+                            inline_keyboard: Some(vec![vec![
+                                telegram_types::InlineKeyboardButton {
+                                    text: "Yes".to_string(),
+                                    callback_data: Some("reset".to_string()),
+                                },
+                            ]]),
+                        }),
+                    },
+                )]
+            }
+            _ => vec![],
         }
     }
 
@@ -442,6 +436,47 @@ impl GameState {
             }
         } else {
             vec![]
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rand::Rng;
+
+    use crate::{
+        message_action::MessageAction,
+        telegram_types::{MessageId, User, UserId},
+    };
+
+    use super::GameState;
+
+    fn get_random_id() -> i64 {
+        let mut rng = rand::thread_rng();
+        rng.gen()
+    }
+
+    fn get_user(user_number: i64) -> User {
+        User {
+            id: UserId(user_number),
+            first_name: format!("Name{}", user_number),
+            last_name: None,
+            username: None,
+        }
+    }
+
+    #[test]
+    fn player_join() {
+        let message_id = MessageId(get_random_id());
+        let mut game_state = GameState::new();
+        let actions = game_state.handle_command(message_id, &get_user(0), "/join");
+
+        assert_eq!(1, actions.len());
+        if let MessageAction::Send(info) = &actions[0] {
+            assert_eq!(message_id, info.reply_to_message_id.unwrap());
+            assert!(info.text.contains("Joined"));
+        } else {
+            panic!("Message action is not Send");
         }
     }
 }

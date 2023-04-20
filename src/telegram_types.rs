@@ -1,20 +1,20 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Copy, Debug)]
 #[serde(transparent)]
-pub struct MessageId(i64);
+pub struct MessageId(pub i64);
 
 #[derive(Deserialize, PartialEq, Eq, Hash, Clone, Copy)]
 #[serde(transparent)]
-pub struct UserId(i64);
+pub struct UserId(pub i64);
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Copy)]
 #[serde(transparent)]
-pub struct ChatId(i64);
+pub struct ChatId(pub i64);
 
 #[derive(Deserialize, PartialEq, Eq)]
 #[serde(transparent)]
-pub struct UpdateId(i64);
+pub struct UpdateId(pub i64);
 
 #[derive(Deserialize)]
 pub struct User {

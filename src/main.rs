@@ -38,14 +38,22 @@ async fn handle_group_message(
     match message.dice {
         None => {
             for command in message.get_commands() {
-                actions.extend(game.handle_command(&message, command.as_str()));
+                if let Some(sender) = &message.from {
+                    actions.extend(game.handle_command(
+                        message.message_id,
+                        sender,
+                        command.as_str(),
+                    ));
+                }
             }
         }
         Some(ref dice) => {
             if matches!(dice.emoji, telegram_types::DiceType::Dice)
                 && message.forward_date.is_none()
             {
-                actions.extend(game.handle_dice(&message, dice.value as u8));
+                if let Some(sender) = &message.from {
+                    actions.extend(game.handle_dice(message.message_id, sender, dice.value as u8));
+                }
             };
         }
     };
