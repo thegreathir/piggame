@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize)]
 pub struct User {
     pub id: i64,
     pub first_name: String,
@@ -8,7 +8,7 @@ pub struct User {
     pub username: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize)]
 pub struct Chat {
     pub id: i64,
     #[serde(rename = "type")]
@@ -16,7 +16,7 @@ pub struct Chat {
     pub username: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize)]
 pub struct MessageEntity {
     pub offset: usize,
     pub length: usize,
@@ -24,7 +24,7 @@ pub struct MessageEntity {
     pub entity_type: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize)]
 pub struct Dice {
     pub emoji: String,
     pub value: i64,
@@ -54,18 +54,18 @@ impl Dice {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct InlineKeyboardButton {
     pub text: String,
     pub callback_data: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ReplyMarkup {
     pub inline_keyboard: Option<Vec<Vec<InlineKeyboardButton>>>
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize)]
 pub struct Message {
     pub message_id: i64,
     pub from: Option<User>,
@@ -89,7 +89,7 @@ impl Message {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize)]
 pub struct CallbackQuery {
     pub id: String,
     pub from: User,
@@ -97,7 +97,7 @@ pub struct CallbackQuery {
     pub data: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize)]
 pub struct Update {
     pub update_id: i64,
     pub message: Option<Message>,
