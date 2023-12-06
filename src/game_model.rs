@@ -419,7 +419,7 @@ impl GameState {
                                 reply_to_message_id: Some(message.message_id),
                                 reply_markup: None,
                                 hint: Some(format!(
-                                    "Game has been just started and \
+                                    "Game has just started and \
                                      it's {} turn to roll the dice. \
                                      Don't forget to mention her username, \
                                      and place a space before and after her username.",
