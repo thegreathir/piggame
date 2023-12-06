@@ -1,4 +1,4 @@
-use std::{iter::Once, sync::OnceLock};
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
@@ -49,7 +49,12 @@ const DEFAULT_SYSTEM_MESSAGE: &str = "Rewrite it in Persian up to 2 sentences. \
         Use friendly, cozy, charming, and informal language. \
         Use emojis.";
 
-pub async fn magic(message: String) -> String {
+pub async fn magic(message: String, hint: Option<String>) -> String {
+    let system_message = match hint {
+        Some(hint) => format!("{}\n{}", DEFAULT_SYSTEM_MESSAGE, hint),
+        None => DEFAULT_SYSTEM_MESSAGE.into(),
+    };
+
     let request = CompletionRequest {
         model: "gpt-4-1106-preview".into(),
         messages: vec![
@@ -59,7 +64,7 @@ pub async fn magic(message: String) -> String {
             },
             Message {
                 role: "system".into(),
-                content: DEFAULT_SYSTEM_MESSAGE.into(),
+                content: system_message,
             },
         ],
     };

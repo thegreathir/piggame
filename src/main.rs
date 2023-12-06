@@ -15,12 +15,19 @@ async fn handle_private_message(
     message_sender: message_action::MessageSender,
     message: telegram_types::Message,
 ) {
+    let hint = match message.from {
+        Some(sender) => Some(format!("Audience name is {}", sender.first_name)),
+        None => None,
+    };
     message_sender
         .send(
             message.chat.id,
             message_action::MessageAction::Send(message_action::MessageInfo {
-                text: magic("Add this bot to groups to enjoy the Pig (dice) game!".to_string())
-                    .await,
+                text: magic(
+                    "Add this bot to groups to enjoy the Pig (dice) game!".to_string(),
+                    hint,
+                )
+                .await,
                 reply_to_message_id: None,
                 reply_markup: None,
             }),
