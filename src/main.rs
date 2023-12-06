@@ -1,8 +1,10 @@
 use dashmap::{mapref::entry::Entry, DashMap};
+use magic_messages::magic;
 use std::{env, sync::Arc};
 use warp::Filter;
 
 mod game_model;
+mod magic_messages;
 mod message_action;
 mod telegram_types;
 mod text_messages;
@@ -17,7 +19,8 @@ async fn handle_private_message(
         .send(
             message.chat.id,
             message_action::MessageAction::Send(message_action::MessageInfo {
-                text: "Add this bot to groups to enjoy the Pig (dice) game!".to_string(),
+                text: magic("Add this bot to groups to enjoy the Pig (dice) game!".to_string())
+                    .await,
                 reply_to_message_id: None,
                 reply_markup: None,
             }),
