@@ -46,6 +46,8 @@ impl GameLogicError {
     fn get_reply_message(
         &self,
         reply_to_message_id: telegram_types::MessageId,
+        audience_name: String,
+        is_premium: bool,
     ) -> message_action::MessageAction {
         let text = match self {
             Self::JoinAfterPlay => "You can not join when game is started! Wait for next round ;)",
@@ -60,6 +62,8 @@ impl GameLogicError {
             text,
             reply_to_message_id: Some(reply_to_message_id),
             reply_markup: None,
+            hint: Some(format!("Audience name is {}.", audience_name)),
+            is_premium,
         })
     }
 }
@@ -73,12 +77,14 @@ enum AddDiceResult<'a> {
 #[derive(Default)]
 pub struct NewGame {
     players: HashMap<telegram_types::UserId, Player>,
+    is_premium: bool,
 }
 
 impl NewGame {
     pub fn new() -> NewGame {
         NewGame {
             players: HashMap::new(),
+            is_premium: false,
         }
     }
 
@@ -95,6 +101,8 @@ impl NewGame {
             text,
             reply_to_message_id: None,
             reply_markup: None,
+            hint: Some("It's the list of players who joined the game.".to_string()),
+            is_premium: self.is_premium,
         })
     }
 }
@@ -103,6 +111,7 @@ pub struct PlayingGame {
     players: Vec<Player>,
     turn: u8,
     current_score: u8,
+    is_premium: bool,
 }
 
 impl PlayingGame {
@@ -114,6 +123,7 @@ impl PlayingGame {
             players,
             turn: 0,
             current_score: 0,
+            is_premium: new_game.is_premium,
         }
     }
 
@@ -167,6 +177,15 @@ impl PlayingGame {
             text: format!("Scores:{}", players_text),
             reply_to_message_id: None,
             reply_markup: None,
+            hint: Some(
+                "It's the list of players in the game and their points. \
+                 If there is a player with king emoji, she's the winner, \
+                 say congratulations to her. \
+                 The one with dice emoji (if exists) is the current player and \
+                 it's her turn to roll the dice."
+                    .to_string(),
+            ),
+            is_premium: self.is_premium,
         })
     }
 }
@@ -197,8 +216,11 @@ impl GameState {
                         user_id,
                         score: 0,
                         name,
-                        username,
+                        username: username.clone(),
                     });
+                    if crate::premium::is_premium(username.unwrap_or_default()) {
+                        new_game.is_premium = true;
+                    }
                     Ok(())
                 } else {
                     Err(GameLogicError::AlreadyJoined)
@@ -282,11 +304,19 @@ impl GameState {
         }
     }
 
+    fn is_premium(&self) -> bool {
+        match self {
+            GameState::New(new_game) => new_game.is_premium,
+            GameState::Playing(playing_game) => playing_game.is_premium,
+        }
+    }
+
     pub fn handle_dice(
         &mut self,
         message: &telegram_types::Message,
         dice_value: u8,
     ) -> Vec<message_action::MessageAction> {
+        let is_premium = self.is_premium();
         if let Some(sender) = &message.from {
             match self.add_dice(sender.id, dice_value) {
                 Ok(AddDiceResult::Finished) => {
@@ -300,11 +330,22 @@ impl GameState {
                             text: "Oops!".to_string(),
                             reply_to_message_id: Some(message.message_id),
                             reply_markup: None,
+                            hint: Some(format!(
+                                "{} lost the turn by getting 1 after she rolled the dice.",
+                                sender.first_name
+                            )),
+                            is_premium,
                         }),
                         message_action::MessageAction::Send(message_action::MessageInfo {
                             text: format!("Your turn: {}", current_player.get_mention_string()),
                             reply_to_message_id: None,
                             reply_markup: None,
+                            hint: Some(format!(
+                                "Now it's {} turn to roll the dice. Don't forget to mention her username, \
+                                 and place a space before and after her username.",
+                                current_player.name
+                            )),
+                            is_premium,
                         }),
                     ]
                 }
@@ -315,10 +356,12 @@ impl GameState {
                                 "{} + {} = {}",
                                 current_player.score,
                                 current_score,
-                                current_player.score + current_score
+                                current_player.score + current_score,
                             ),
                             reply_to_message_id: Some(message.message_id),
                             reply_markup: None,
+                            hint: None,
+                            is_premium: false,
                         },
                     )]
                 }
@@ -347,11 +390,21 @@ impl GameState {
                                     text: "Joined successfully ;)".to_string(),
                                     reply_to_message_id: Some(message.message_id),
                                     reply_markup: None,
+                                    hint: format!(
+                                        "Audience name is {}. She joined the game",
+                                        sender.first_name
+                                    )
+                                    .into(),
+                                    is_premium: self.is_premium(),
                                 },
                             )]
                         }
                         Err(err) => {
-                            vec![err.get_reply_message(message.message_id)]
+                            vec![err.get_reply_message(
+                                message.message_id,
+                                sender.first_name.clone(),
+                                self.is_premium(),
+                            )]
                         }
                     }
                 }
@@ -365,11 +418,23 @@ impl GameState {
                                 ),
                                 reply_to_message_id: Some(message.message_id),
                                 reply_markup: None,
+                                hint: Some(format!(
+                                    "Game has been just started and \
+                                     it's {} turn to roll the dice. \
+                                     Don't forget to mention her username, \
+                                     and place a space before and after her username.",
+                                    current_player.name
+                                )),
+                                is_premium: self.is_premium(),
                             },
                         )]
                     }
                     Err(err) => {
-                        vec![err.get_reply_message(message.message_id)]
+                        vec![err.get_reply_message(
+                            message.message_id,
+                            sender.first_name.clone(),
+                            self.is_premium(),
+                        )]
                     }
                 },
                 "/hold" | "/hold@piiigdicegamebot" => match self.hold(sender.id) {
@@ -383,11 +448,23 @@ impl GameState {
                                 ),
                                 reply_to_message_id: Some(message.message_id),
                                 reply_markup: None,
+                                hint: Some(format!(
+                                    "{} decided to hold her achieved points and pass the dice \
+                                     to the next player. \
+                                     Don't forget to mention the next player username, \
+                                     and place a space before and after her username.",
+                                    sender.first_name
+                                )),
+                                is_premium: self.is_premium(),
                             },
                         )]
                     }
                     Err(err) => {
-                        vec![err.get_reply_message(message.message_id)]
+                        vec![err.get_reply_message(
+                            message.message_id,
+                            sender.first_name.clone(),
+                            self.is_premium(),
+                        )]
                     }
                 },
                 "/result" | "/result@piiigdicegamebot" => {
@@ -406,6 +483,11 @@ impl GameState {
                                     },
                                 ]]),
                             }),
+                            hint: Some(format!(
+                                "Audience name is {}. She wants to reset the game",
+                                sender.first_name
+                            )),
+                            is_premium: self.is_premium(),
                         },
                     )]
                 }
@@ -423,6 +505,7 @@ impl GameState {
     ) -> Vec<message_action::MessageAction> {
         if let Some(command) = data {
             if command.as_str() == "reset" {
+                let is_premium = self.is_premium();
                 self.reset();
 
                 vec![message_action::MessageAction::Edit(
@@ -434,6 +517,8 @@ impl GameState {
                             reply_markup: Some(telegram_types::ReplyMarkup {
                                 inline_keyboard: Some(vec![vec![]]),
                             }),
+                            hint: None,
+                            is_premium,
                         },
                     },
                 )]
