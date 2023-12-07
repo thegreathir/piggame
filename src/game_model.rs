@@ -291,13 +291,17 @@ impl GameState {
         }
     }
 
-    fn hold(&mut self, user_id: telegram_types::UserId) -> Result<(u8, &Player), GameLogicError> {
+    fn hold(
+        &mut self,
+        user_id: telegram_types::UserId,
+    ) -> Result<(u8, u8, &Player), GameLogicError> {
         let playing_game = self.get_playing_game_mut()?;
         playing_game.check_turn(user_id)?;
         playing_game.get_current_player_mut().score += playing_game.current_score;
         let result = playing_game.get_current_player().score;
+        let turn_score = playing_game.current_score;
         playing_game.advance_turn();
-        Ok((result, playing_game.get_current_player()))
+        Ok((result, turn_score, playing_game.get_current_player()))
     }
 
     fn send_results(&self) -> message_action::MessageAction {
@@ -421,16 +425,16 @@ impl GameState {
                     }
                 },
                 "/hold" | "/hold@piiigdicegamebot" => match self.hold(sender.id) {
-                    Ok((score, current_player)) => {
+                    Ok((total_score, turn_score, current_player)) => {
                         vec![message_action::MessageAction::Send(
                             message_action::MessageInfo {
                                 text: crate::prompt_messages::hold(
-                                    score,
+                                    total_score,
                                     &current_player.get_mention_string(),
                                 ),
                                 reply_to_message_id: Some(message.message_id),
                                 reply_markup: None,
-                                hint: Some(hold_hint(&sender.first_name, score)),
+                                hint: Some(hold_hint(&sender.first_name, turn_score, total_score)),
                                 is_premium: self.is_premium(),
                             },
                         )]

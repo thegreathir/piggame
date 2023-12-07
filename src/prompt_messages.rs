@@ -123,16 +123,17 @@ pub fn hold(score: u8, mention_string: &String) -> String {
     )
 }
 
-pub fn hold_hint(name: &String, score: u8) -> String {
+pub fn hold_hint(name: &String, turn_score: u8, total_score: u8) -> String {
     format!(
         "\
         The game is a Pig dice game. \
         {} decided to hold their achieved points and pass the dice \
         to the next player. \
-        The player achieved {} points during the turn. \
+        The player achieved {} points during the turn and now got {} \
+        points in total. \
         Tell your opinion about this decision. \
         Also, don't forget to mention the next player username.",
-        name, score
+        name, turn_score, total_score
     )
 }
 
