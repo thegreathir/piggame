@@ -2,6 +2,8 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
+use crate::prompt_messages::system_message;
+
 #[derive(Deserialize, Serialize)]
 struct Message {
     role: String,
@@ -45,16 +47,7 @@ async fn submit(request: CompletionRequest) -> Result<CompletionResponse, reqwes
         .await
 }
 
-const DEFAULT_SYSTEM_MESSAGE: &str = "Rewrite it in Persian up to 3 sentences. \
-        Use friendly, cozy, charming, and informal language. \
-        Use emojis.";
-
 pub async fn magic(message: String, hint: Option<String>) -> String {
-    let system_message = match hint {
-        Some(hint) => format!("{}\n(Extra info: {})", DEFAULT_SYSTEM_MESSAGE, hint),
-        None => DEFAULT_SYSTEM_MESSAGE.into(),
-    };
-
     let request = CompletionRequest {
         model: "gpt-4-1106-preview".into(),
         messages: vec![
@@ -64,7 +57,7 @@ pub async fn magic(message: String, hint: Option<String>) -> String {
             },
             Message {
                 role: "system".into(),
-                content: system_message,
+                content: system_message(&hint),
             },
         ],
     };

@@ -1,4 +1,5 @@
 use dashmap::{mapref::entry::Entry, DashMap};
+use prompt_messages::{greeting, greeting_hint};
 use std::sync::Arc;
 use warp::Filter;
 
@@ -6,6 +7,7 @@ mod game_model;
 mod magic_messages;
 mod message_action;
 mod premium;
+mod prompt_messages;
 mod telegram_types;
 mod text_messages;
 
@@ -14,7 +16,7 @@ type GameStateStorage = Arc<DashMap<telegram_types::ChatId, game_model::GameStat
 async fn handle_private_message(message: telegram_types::Message) {
     let (hint, is_premium) = match message.from {
         Some(sender) => (
-            Some(format!("Audience name is {}", sender.first_name)),
+            Some(greeting_hint(&sender.first_name)),
             premium::is_premium(sender.username.unwrap_or_default()),
         ),
         None => (None, false),
@@ -22,7 +24,7 @@ async fn handle_private_message(message: telegram_types::Message) {
     message_action::send(
         message.chat.id,
         message_action::MessageAction::Send(message_action::MessageInfo {
-            text: "Add this bot to groups to enjoy the Pig (dice) game!".to_owned(),
+            text: greeting().to_owned(),
             reply_to_message_id: None,
             reply_markup: None,
             hint,
