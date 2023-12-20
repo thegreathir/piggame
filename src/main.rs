@@ -1,35 +1,40 @@
 use dashmap::{mapref::entry::Entry, DashMap};
-use std::{env, sync::Arc};
+use prompt_messages::{greeting, greeting_hint};
+use std::sync::Arc;
 use warp::Filter;
 
 mod game_model;
+mod magic_messages;
 mod message_action;
+mod premium;
+mod prompt_messages;
 mod telegram_types;
 mod text_messages;
 
 type GameStateStorage = Arc<DashMap<telegram_types::ChatId, game_model::GameState>>;
 
-async fn handle_private_message(
-    message_sender: message_action::MessageSender,
-    message: telegram_types::Message,
-) {
-    message_sender
-        .send(
-            message.chat.id,
-            message_action::MessageAction::Send(message_action::MessageInfo {
-                text: "Add this bot to groups to enjoy the Pig (dice) game!".to_string(),
-                reply_to_message_id: None,
-                reply_markup: None,
-            }),
-        )
-        .await;
+async fn handle_private_message(message: telegram_types::Message) {
+    let (hint, is_premium) = match message.from {
+        Some(sender) => (
+            Some(greeting_hint(&sender.first_name)),
+            premium::is_premium(sender.username.unwrap_or_default()),
+        ),
+        None => (None, false),
+    };
+    message_action::send(
+        message.chat.id,
+        message_action::MessageAction::Send(message_action::MessageInfo {
+            text: greeting().to_owned(),
+            reply_to_message_id: None,
+            reply_markup: None,
+            hint,
+            is_premium,
+        }),
+    )
+    .await;
 }
 
-async fn handle_group_message(
-    message_sender: message_action::MessageSender,
-    message: telegram_types::Message,
-    storage: GameStateStorage,
-) {
+async fn handle_group_message(message: telegram_types::Message, storage: GameStateStorage) {
     let mut game = storage
         .entry(message.chat.id)
         .or_insert(game_model::GameState::New(game_model::NewGame::new()));
@@ -51,23 +56,17 @@ async fn handle_group_message(
     };
 
     for action in actions {
-        message_sender.send(message.chat.id, action).await;
+        message_action::send(message.chat.id, action).await;
     }
 }
 
-async fn handle(
-    message_sender: message_action::MessageSender,
-    update: telegram_types::Update,
-    storage: GameStateStorage,
-) {
+async fn handle(update: telegram_types::Update, storage: GameStateStorage) {
     if let Some(message) = update.message {
         match message.chat.chat_type {
             telegram_types::ChatType::Group | telegram_types::ChatType::SuperGroup => {
-                handle_group_message(message_sender, message, storage).await
+                handle_group_message(message, storage).await
             }
-            telegram_types::ChatType::Private => {
-                handle_private_message(message_sender, message).await
-            }
+            telegram_types::ChatType::Private => handle_private_message(message).await,
             _ => (),
         }
     } else if let Some(callback_query) = update.callback_query {
@@ -76,7 +75,7 @@ async fn handle(
                 Entry::Occupied(mut occupied) => {
                     let game = occupied.get_mut();
                     for action in game.handle_callback_query(&message, callback_query.data) {
-                        message_sender.send(message.chat.id, action).await;
+                        message_action::send(message.chat.id, action).await;
                     }
                 }
                 Entry::Vacant(_) => (),
@@ -89,27 +88,22 @@ async fn handle(
 async fn main() {
     let subscriber = tracing_subscriber::FmtSubscriber::new();
     tracing::subscriber::set_global_default(subscriber).unwrap();
-    let bot_token: String = env::var("BOT_TOKEN").unwrap();
     let storage = GameStateStorage::new(DashMap::new());
 
     let route = warp::path::end()
         .and(warp::body::json())
         .and(warp::any().map(move || storage.clone()))
-        .and(warp::any().map(move || bot_token.clone()))
-        .and_then(
-            |body: serde_json::Value, storage: GameStateStorage, bot_token: String| async {
-                match serde_json::value::from_value::<telegram_types::Update>(body) {
-                    Ok(update) => {
-                        let message_sender = message_action::MessageSender::new(bot_token);
-                        handle(message_sender, update, storage).await;
-                    }
-                    Err(err) => {
-                        tracing::error!("Can not parse Telegram request body, error: {}", err);
-                    }
-                };
-                Ok::<_, std::convert::Infallible>(warp::reply())
-            },
-        );
+        .and_then(|body: serde_json::Value, storage: GameStateStorage| async {
+            match serde_json::value::from_value::<telegram_types::Update>(body) {
+                Ok(update) => {
+                    handle(update, storage).await;
+                }
+                Err(err) => {
+                    tracing::error!("Can not parse Telegram request body, error: {}", err);
+                }
+            };
+            Ok::<_, std::convert::Infallible>(warp::reply())
+        });
 
     warp::serve(route).run(([127, 0, 0, 1], 32926)).await;
 }

@@ -1,3 +1,10 @@
+use crate::prompt_messages::{
+    already_joined, game_already_started, game_is_not_started, game_logic_error_hint, hold_hint,
+    join_after_play, joined, joined_hint, next_turn, next_turn_hint, not_enough_player,
+    not_your_turn, player_list_hint, reset, reset_confirm, reset_confirm_hint, reset_hint,
+    result_hint, started, started_hint, turn_lost, turn_lost_hint,
+};
+
 use super::message_action;
 use super::telegram_types;
 use super::text_messages;
@@ -46,39 +53,45 @@ impl GameLogicError {
     fn get_reply_message(
         &self,
         reply_to_message_id: telegram_types::MessageId,
+        audience_name: String,
+        is_premium: bool,
     ) -> message_action::MessageAction {
         let text = match self {
-            Self::JoinAfterPlay => "You can not join when game is started! Wait for next round ;)",
-            Self::AlreadyJoined => "You have joined already :)",
-            Self::AlreadyPlaying => "Game is already started :(",
-            Self::NotEnoughPlayers => "Not enough players joined yet :(",
-            Self::IsNotPlaying => "Game is not started yet :(",
-            Self::WrongTurn => "This is not your turn :(",
+            Self::JoinAfterPlay => join_after_play(),
+            Self::AlreadyJoined => already_joined(),
+            Self::AlreadyPlaying => game_already_started(),
+            Self::NotEnoughPlayers => not_enough_player(),
+            Self::IsNotPlaying => game_is_not_started(),
+            Self::WrongTurn => not_your_turn(),
         }
         .to_string();
         message_action::MessageAction::Send(message_action::MessageInfo {
             text,
             reply_to_message_id: Some(reply_to_message_id),
             reply_markup: None,
+            hint: Some(game_logic_error_hint(&audience_name)),
+            is_premium,
         })
     }
 }
 
 enum AddDiceResult<'a> {
     Finished,
-    TurnLost(&'a Player),
+    TurnLost(&'a Player, u8),
     Continue(&'a Player, u8),
 }
 
 #[derive(Default)]
 pub struct NewGame {
     players: HashMap<telegram_types::UserId, Player>,
+    is_premium: bool,
 }
 
 impl NewGame {
     pub fn new() -> NewGame {
         NewGame {
             players: HashMap::new(),
+            is_premium: false,
         }
     }
 
@@ -95,6 +108,8 @@ impl NewGame {
             text,
             reply_to_message_id: None,
             reply_markup: None,
+            hint: Some(player_list_hint().to_string()),
+            is_premium: self.is_premium,
         })
     }
 }
@@ -103,6 +118,7 @@ pub struct PlayingGame {
     players: Vec<Player>,
     turn: u8,
     current_score: u8,
+    is_premium: bool,
 }
 
 impl PlayingGame {
@@ -114,6 +130,7 @@ impl PlayingGame {
             players,
             turn: 0,
             current_score: 0,
+            is_premium: new_game.is_premium,
         }
     }
 
@@ -167,11 +184,12 @@ impl PlayingGame {
             text: format!("Scores:{}", players_text),
             reply_to_message_id: None,
             reply_markup: None,
+            hint: Some(result_hint().to_string()),
+            is_premium: self.is_premium,
         })
     }
 }
 
-// TODO: Move magic numbers and constant strings to configuration
 pub enum GameState {
     New(NewGame),
     Playing(PlayingGame),
@@ -197,8 +215,11 @@ impl GameState {
                         user_id,
                         score: 0,
                         name,
-                        username,
+                        username: username.clone(),
                     });
+                    if crate::premium::is_premium(username.unwrap_or_default()) {
+                        new_game.is_premium = true;
+                    }
                     Ok(())
                 } else {
                     Err(GameLogicError::AlreadyJoined)
@@ -249,8 +270,12 @@ impl GameState {
         let playing_game = self.get_playing_game_mut()?;
         playing_game.check_turn(user_id)?;
         if value == 1 {
+            let last_score = playing_game.current_score;
             playing_game.advance_turn();
-            Ok(AddDiceResult::TurnLost(playing_game.get_current_player()))
+            Ok(AddDiceResult::TurnLost(
+                playing_game.get_current_player(),
+                last_score,
+            ))
         } else {
             playing_game.current_score += value;
             if playing_game.get_current_player().score + playing_game.current_score >= 100 {
@@ -266,13 +291,17 @@ impl GameState {
         }
     }
 
-    fn hold(&mut self, user_id: telegram_types::UserId) -> Result<(u8, &Player), GameLogicError> {
+    fn hold(
+        &mut self,
+        user_id: telegram_types::UserId,
+    ) -> Result<(u8, u8, &Player), GameLogicError> {
         let playing_game = self.get_playing_game_mut()?;
         playing_game.check_turn(user_id)?;
         playing_game.get_current_player_mut().score += playing_game.current_score;
         let result = playing_game.get_current_player().score;
+        let turn_score = playing_game.current_score;
         playing_game.advance_turn();
-        Ok((result, playing_game.get_current_player()))
+        Ok((result, turn_score, playing_game.get_current_player()))
     }
 
     fn send_results(&self) -> message_action::MessageAction {
@@ -282,11 +311,19 @@ impl GameState {
         }
     }
 
+    fn is_premium(&self) -> bool {
+        match self {
+            GameState::New(new_game) => new_game.is_premium,
+            GameState::Playing(playing_game) => playing_game.is_premium,
+        }
+    }
+
     pub fn handle_dice(
         &mut self,
         message: &telegram_types::Message,
         dice_value: u8,
     ) -> Vec<message_action::MessageAction> {
+        let is_premium = self.is_premium();
         if let Some(sender) = &message.from {
             match self.add_dice(sender.id, dice_value) {
                 Ok(AddDiceResult::Finished) => {
@@ -294,17 +331,21 @@ impl GameState {
                     self.reset();
                     vec![action]
                 }
-                Ok(AddDiceResult::TurnLost(current_player)) => {
+                Ok(AddDiceResult::TurnLost(current_player, last_score)) => {
                     vec![
                         message_action::MessageAction::Send(message_action::MessageInfo {
-                            text: "Oops!".to_string(),
+                            text: turn_lost().to_string(),
                             reply_to_message_id: Some(message.message_id),
                             reply_markup: None,
+                            hint: Some(turn_lost_hint(&sender.first_name, last_score)),
+                            is_premium,
                         }),
                         message_action::MessageAction::Send(message_action::MessageInfo {
-                            text: format!("Your turn: {}", current_player.get_mention_string()),
+                            text: next_turn(&current_player.get_mention_string()),
                             reply_to_message_id: None,
                             reply_markup: None,
+                            hint: Some(next_turn_hint(&current_player.name)),
+                            is_premium,
                         }),
                     ]
                 }
@@ -315,10 +356,12 @@ impl GameState {
                                 "{} + {} = {}",
                                 current_player.score,
                                 current_score,
-                                current_player.score + current_score
+                                current_player.score + current_score,
                             ),
                             reply_to_message_id: Some(message.message_id),
                             reply_markup: None,
+                            hint: None,
+                            is_premium: false,
                         },
                     )]
                 }
@@ -344,14 +387,20 @@ impl GameState {
                         Ok(_) => {
                             vec![message_action::MessageAction::Send(
                                 message_action::MessageInfo {
-                                    text: "Joined successfully ;)".to_string(),
+                                    text: joined().to_string(),
                                     reply_to_message_id: Some(message.message_id),
                                     reply_markup: None,
+                                    hint: joined_hint(&sender.first_name).into(),
+                                    is_premium: self.is_premium(),
                                 },
                             )]
                         }
                         Err(err) => {
-                            vec![err.get_reply_message(message.message_id)]
+                            vec![err.get_reply_message(
+                                message.message_id,
+                                sender.first_name.clone(),
+                                self.is_premium(),
+                            )]
                         }
                     }
                 }
@@ -359,35 +408,43 @@ impl GameState {
                     Ok(current_player) => {
                         vec![message_action::MessageAction::Send(
                             message_action::MessageInfo {
-                                text: format!(
-                                    "Started successfully. Turn: {}",
-                                    current_player.get_mention_string()
-                                ),
+                                text: started(&current_player.get_mention_string()),
                                 reply_to_message_id: Some(message.message_id),
                                 reply_markup: None,
+                                hint: Some(started_hint(&current_player.name)),
+                                is_premium: self.is_premium(),
                             },
                         )]
                     }
                     Err(err) => {
-                        vec![err.get_reply_message(message.message_id)]
+                        vec![err.get_reply_message(
+                            message.message_id,
+                            sender.first_name.clone(),
+                            self.is_premium(),
+                        )]
                     }
                 },
                 "/hold" | "/hold@piiigdicegamebot" => match self.hold(sender.id) {
-                    Ok((score, current_player)) => {
+                    Ok((total_score, turn_score, current_player)) => {
                         vec![message_action::MessageAction::Send(
                             message_action::MessageInfo {
-                                text: format!(
-                                    "Your score is {}. Turn: {}",
-                                    score,
-                                    current_player.get_mention_string()
+                                text: crate::prompt_messages::hold(
+                                    total_score,
+                                    &current_player.get_mention_string(),
                                 ),
                                 reply_to_message_id: Some(message.message_id),
                                 reply_markup: None,
+                                hint: Some(hold_hint(&sender.first_name, turn_score, total_score)),
+                                is_premium: self.is_premium(),
                             },
                         )]
                     }
                     Err(err) => {
-                        vec![err.get_reply_message(message.message_id)]
+                        vec![err.get_reply_message(
+                            message.message_id,
+                            sender.first_name.clone(),
+                            self.is_premium(),
+                        )]
                     }
                 },
                 "/result" | "/result@piiigdicegamebot" => {
@@ -396,7 +453,7 @@ impl GameState {
                 "/reset" | "/reset@piiigdicegamebot" => {
                     vec![message_action::MessageAction::Send(
                         message_action::MessageInfo {
-                            text: "Are you sure?".to_string(),
+                            text: reset_confirm().to_string(),
                             reply_to_message_id: Some(message.message_id),
                             reply_markup: Some(telegram_types::ReplyMarkup {
                                 inline_keyboard: Some(vec![vec![
@@ -406,6 +463,8 @@ impl GameState {
                                     },
                                 ]]),
                             }),
+                            hint: Some(reset_confirm_hint(&sender.first_name)),
+                            is_premium: self.is_premium(),
                         },
                     )]
                 }
@@ -423,17 +482,20 @@ impl GameState {
     ) -> Vec<message_action::MessageAction> {
         if let Some(command) = data {
             if command.as_str() == "reset" {
+                let is_premium = self.is_premium();
                 self.reset();
 
                 vec![message_action::MessageAction::Edit(
                     message_action::EditMessageInfo {
                         message_id: message.message_id,
                         message_info: message_action::MessageInfo {
-                            text: "Game is reset (players should join again).".to_string(),
+                            text: reset().to_string(),
                             reply_to_message_id: None,
                             reply_markup: Some(telegram_types::ReplyMarkup {
                                 inline_keyboard: Some(vec![vec![]]),
                             }),
+                            hint: Some(reset_hint().to_string()),
+                            is_premium,
                         },
                     },
                 )]
