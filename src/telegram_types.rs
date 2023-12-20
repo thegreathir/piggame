@@ -76,13 +76,13 @@ pub struct Dice {
     pub value: i64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct InlineKeyboardButton {
     pub text: String,
     pub callback_data: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ReplyMarkup {
     pub inline_keyboard: Option<Vec<Vec<InlineKeyboardButton>>>,
 }
@@ -124,4 +124,10 @@ pub struct Update {
     pub update_id: UpdateId,
     pub message: Option<Message>,
     pub callback_query: Option<CallbackQuery>,
+}
+
+#[derive(Deserialize)]
+pub struct ResultMessage {
+    pub ok: bool,
+    pub result: Message,
 }

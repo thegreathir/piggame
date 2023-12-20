@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
 
 use super::telegram_types;
+use futures::{pin_mut, StreamExt};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -14,14 +15,6 @@ pub struct MessageInfo {
     pub hint: Option<String>,
     #[serde(skip_serializing)]
     pub is_premium: bool,
-}
-
-impl MessageInfo {
-    async fn apply_magic(&mut self) {
-        if self.is_premium {
-            self.text = crate::magic_messages::magic(self.text.clone(), self.hint.clone()).await;
-        }
-    }
 }
 
 #[derive(Serialize)]
@@ -43,6 +36,107 @@ struct ChatMessage<Info: Serialize> {
     info: Info,
 }
 
+async fn send_stream(
+    client: &reqwest::Client,
+    bot_token: &String,
+    info: MessageInfo,
+    chat_id: telegram_types::ChatId,
+    message_id: Option<telegram_types::MessageId>,
+) {
+    match crate::magic_messages::magic(&info.text, &info.hint).await {
+        Ok(stream) => {
+            pin_mut!(stream);
+            let mut message_id = message_id;
+            let mut text = String::new();
+            let mut added_len = 0;
+            while let Some(chunk) = stream.next().await {
+                let Some(chunk) = chunk else {
+                    continue;
+                };
+                text.push_str(&chunk);
+                added_len += chunk.len();
+                if added_len < 8 {
+                    continue;
+                }
+                added_len = 0;
+                if let Some(new_message_id) =
+                    append_chunk(message_id, client, bot_token, chat_id, &text, &info).await
+                {
+                    message_id = Some(new_message_id);
+                } else {
+                    return;
+                }
+            }
+            if added_len == 0 {
+                return;
+            }
+            append_chunk(message_id, client, bot_token, chat_id, &text, &info).await;
+        }
+        Err(err) => {
+            tracing::error!("Failed to call OpenAI API, error: {}", err);
+        }
+    }
+}
+
+async fn append_chunk(
+    message_id: Option<telegram_types::MessageId>,
+    client: &reqwest::Client,
+    bot_token: &String,
+    chat_id: telegram_types::ChatId,
+    text: &str,
+    info: &MessageInfo,
+) -> Option<telegram_types::MessageId> {
+    match message_id {
+        Some(message_id) => {
+            let result = get_result(
+                client
+                    .post(format!(
+                        "https://api.telegram.org/bot{}/{}",
+                        bot_token, "editMessageText"
+                    ))
+                    .json(&ChatMessage::<EditMessageInfo> {
+                        chat_id,
+                        info: EditMessageInfo {
+                            message_id,
+                            message_info: MessageInfo {
+                                text: text.to_owned(),
+                                reply_markup: info.reply_markup.clone(),
+                                hint: Option::None,
+                                ..*info
+                            },
+                        },
+                    })
+                    .send()
+                    .await,
+            )
+            .await?;
+            Some(result.result.message_id)
+        }
+        None => {
+            let result = get_result(
+                client
+                    .post(format!(
+                        "https://api.telegram.org/bot{}/{}",
+                        bot_token, "sendMessage"
+                    ))
+                    .json(&ChatMessage::<MessageInfo> {
+                        chat_id,
+                        info: MessageInfo {
+                            text: text.to_owned(),
+                            reply_markup: info.reply_markup.clone(),
+                            hint: Option::None,
+                            ..*info
+                        },
+                    })
+                    .send()
+                    .await,
+            )
+            .await?;
+            Some(result.result.message_id)
+        }
+    }
+}
+
 pub async fn send(chat_id: telegram_types::ChatId, action: MessageAction) {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     static TOKEN: OnceLock<String> = OnceLock::new();
@@ -51,8 +145,11 @@ pub async fn send(chat_id: telegram_types::ChatId, action: MessageAction) {
     });
     let client = CLIENT.get_or_init(reqwest::Client::new);
     let result = match action {
-        MessageAction::Send(mut info) => {
-            info.apply_magic().await;
+        MessageAction::Send(info) => {
+            if info.is_premium {
+                send_stream(client, bot_token, info, chat_id, None).await;
+                return;
+            }
             client
                 .post(format!(
                     "https://api.telegram.org/bot{}/{}",
@@ -62,8 +159,18 @@ pub async fn send(chat_id: telegram_types::ChatId, action: MessageAction) {
                 .send()
                 .await
         }
-        MessageAction::Edit(mut info) => {
-            info.message_info.apply_magic().await;
+        MessageAction::Edit(info) => {
+            if info.message_info.is_premium {
+                send_stream(
+                    client,
+                    bot_token,
+                    info.message_info,
+                    chat_id,
+                    Some(info.message_id),
+                )
+                .await;
+                return;
+            }
             client
                 .post(format!(
                     "https://api.telegram.org/bot{}/{}",
@@ -75,6 +182,12 @@ pub async fn send(chat_id: telegram_types::ChatId, action: MessageAction) {
         }
     };
 
+    handle_api_call(result).await;
+}
+
+async fn handle_api_call(
+    result: Result<reqwest::Response, reqwest::Error>,
+) -> Option<reqwest::Response> {
     match result {
         Ok(res) => {
             if !res.status().is_success() {
@@ -86,10 +199,26 @@ pub async fn send(chat_id: telegram_types::ChatId, action: MessageAction) {
                         tracing::error!("Telegram API call was not success, can not extract response text neither");
                     }
                 }
+                return None;
             }
+            Some(res)
         }
         Err(err) => {
             tracing::error!("Can not send a request to Telegram, error: {}", err);
+            None
         }
-    };
+    }
+}
+
+async fn get_result(
+    response_result: Result<reqwest::Response, reqwest::Error>,
+) -> Option<telegram_types::ResultMessage> {
+    let response = handle_api_call(response_result).await?;
+    match response.json::<telegram_types::ResultMessage>().await {
+        Ok(result) => Some(result),
+        Err(err) => {
+            tracing::error!("Can not parse Telegram response, error: {}", err);
+            None
+        }
+    }
 }
