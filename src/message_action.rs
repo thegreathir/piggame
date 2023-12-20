@@ -1,7 +1,7 @@
-use std::sync::OnceLock;
+use std::{pin::pin, sync::OnceLock};
 
 use super::telegram_types;
-use futures::{pin_mut, StreamExt};
+use futures::StreamExt;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -41,12 +41,18 @@ async fn send_stream(
     bot_token: &String,
     info: MessageInfo,
     chat_id: telegram_types::ChatId,
-    message_id: Option<telegram_types::MessageId>,
+    mut message_id: Option<telegram_types::MessageId>,
 ) {
+    if let Some(new_message_id) =
+        append_chunk(message_id, client, bot_token, chat_id, "...", &info).await
+    {
+        message_id = Some(new_message_id);
+    } else {
+        return;
+    }
     match crate::magic_messages::magic(&info.text, &info.hint).await {
         Ok(stream) => {
-            pin_mut!(stream);
-            let mut message_id = message_id;
+            let mut stream = pin!(stream);
             let mut text = String::new();
             let mut added_len = 0;
             while let Some(chunk) = stream.next().await {
@@ -55,7 +61,7 @@ async fn send_stream(
                 };
                 text.push_str(&chunk);
                 added_len += chunk.len();
-                if added_len < 8 {
+                if added_len < 30 {
                     continue;
                 }
                 added_len = 0;
