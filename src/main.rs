@@ -35,25 +35,27 @@ async fn handle_private_message(message: telegram_types::Message) {
 }
 
 async fn handle_group_message(message: telegram_types::Message, storage: GameStateStorage) {
-    let mut game = storage
-        .entry(message.chat.id)
-        .or_insert(game_model::GameState::New(game_model::NewGame::new()));
-
     let mut actions = vec![];
-    match message.dice {
-        None => {
-            for command in message.get_commands() {
-                actions.extend(game.handle_command(&message, command.as_str()));
+    {
+        let mut game = storage
+            .entry(message.chat.id)
+            .or_insert(game_model::GameState::New(game_model::NewGame::new()));
+
+        match message.dice {
+            None => {
+                for command in message.get_commands() {
+                    actions.extend(game.handle_command(&message, command.as_str()));
+                }
             }
-        }
-        Some(ref dice) => {
-            if matches!(dice.emoji, telegram_types::DiceType::Dice)
-                && message.forward_date.is_none()
-            {
-                actions.extend(game.handle_dice(&message, dice.value as u8));
-            };
-        }
-    };
+            Some(ref dice) => {
+                if matches!(dice.emoji, telegram_types::DiceType::Dice)
+                    && message.forward_date.is_none()
+                {
+                    actions.extend(game.handle_dice(&message, dice.value as u8));
+                };
+            }
+        };
+    }
 
     for action in actions {
         message_action::send(message.chat.id, action).await;
@@ -71,15 +73,16 @@ async fn handle(update: telegram_types::Update, storage: GameStateStorage) {
         }
     } else if let Some(callback_query) = update.callback_query {
         if let Some(message) = callback_query.message {
-            match storage.entry(message.chat.id) {
+            let actions = match storage.entry(message.chat.id) {
                 Entry::Occupied(mut occupied) => {
                     let game = occupied.get_mut();
-                    for action in game.handle_callback_query(&message, callback_query.data) {
-                        message_action::send(message.chat.id, action).await;
-                    }
+                    game.handle_callback_query(&message, callback_query.data)
                 }
-                Entry::Vacant(_) => (),
+                Entry::Vacant(_) => vec![],
             };
+            for action in actions {
+                message_action::send(message.chat.id, action).await;
+            }
         };
     };
 }
