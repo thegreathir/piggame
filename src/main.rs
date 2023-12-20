@@ -1,7 +1,7 @@
+use axum::{extract::State, routing::post, Json, Router};
 use dashmap::{mapref::entry::Entry, DashMap};
 use prompt_messages::{greeting, greeting_hint};
 use std::sync::Arc;
-use warp::Filter;
 
 mod game_model;
 mod magic_messages;
@@ -62,7 +62,10 @@ async fn handle_group_message(message: telegram_types::Message, storage: GameSta
     }
 }
 
-async fn handle(update: telegram_types::Update, storage: GameStateStorage) {
+async fn handle(
+    State(storage): State<GameStateStorage>,
+    Json(update): Json<telegram_types::Update>,
+) {
     if let Some(message) = update.message {
         match message.chat.chat_type {
             telegram_types::ChatType::Group | telegram_types::ChatType::SuperGroup => {
@@ -89,24 +92,12 @@ async fn handle(update: telegram_types::Update, storage: GameStateStorage) {
 
 #[tokio::main]
 async fn main() {
-    let subscriber = tracing_subscriber::FmtSubscriber::new();
-    tracing::subscriber::set_global_default(subscriber).unwrap();
+    tracing_subscriber::fmt::init();
     let storage = GameStateStorage::new(DashMap::new());
 
-    let route = warp::path::end()
-        .and(warp::body::json())
-        .and(warp::any().map(move || storage.clone()))
-        .and_then(|body: serde_json::Value, storage: GameStateStorage| async {
-            match serde_json::value::from_value::<telegram_types::Update>(body) {
-                Ok(update) => {
-                    handle(update, storage).await;
-                }
-                Err(err) => {
-                    tracing::error!("Can not parse Telegram request body, error: {}", err);
-                }
-            };
-            Ok::<_, std::convert::Infallible>(warp::reply())
-        });
-
-    warp::serve(route).run(([127, 0, 0, 1], 32926)).await;
+    let app = Router::new().route("/", post(handle)).with_state(storage);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:32926")
+        .await
+        .unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
