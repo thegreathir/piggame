@@ -21,9 +21,6 @@ pub fn greeting_hint(name: &String) -> String {
     format!("Audience name is {}.", name)
 }
 
-pub const fn join_after_play() -> &'static str {
-    "You can't join when game is started! Wait for next round ;)"
-}
 pub const fn already_joined() -> &'static str {
     "You have joined already, you can't do it again :)"
 }
@@ -38,6 +35,9 @@ pub const fn game_is_not_started() -> &'static str {
 }
 pub const fn not_your_turn() -> &'static str {
     "This is not your turn :("
+}
+pub const fn not_joined() -> &'static str {
+    "You are not joined the game so you can't leave :("
 }
 
 pub fn game_logic_error_hint(name: &String) -> String {
@@ -77,16 +77,15 @@ pub fn turn_lost_hint(name: &String, last_score: u8) -> String {
     )
 }
 
-pub fn next_turn(mention_string: &String) -> String {
-    format!("It's {} turn to roll the dice.", mention_string)
+pub fn next_turn(player_name: &String) -> String {
+    format!("It's {} turn to roll the dice.", player_name)
 }
 
 pub fn next_turn_hint(name: &String) -> String {
     format!(
         "\
         The game is a Pig dice game and \
-        now it's {} turn to roll the dice. \
-        Don't forget to mention the player's username.",
+        now it's {} turn to roll the dice.",
         name
     )
 }
@@ -104,8 +103,22 @@ pub fn joined_hint(name: &String) -> String {
     )
 }
 
-pub fn started(mention_string: &String) -> String {
-    format!("The game has just started. Turn: {}.", mention_string)
+pub const fn player_left() -> &'static str {
+    "You left the game."
+}
+
+pub fn player_left_hint(name: &String, score: u8) -> String {
+    format!(
+        "\
+        The game is a Pig dice game and \
+        {} left the game with {} points. \
+        Say your opinion.",
+        name, score
+    )
+}
+
+pub fn started(player_name: &String) -> String {
+    format!("The game has just started. Turn: {}.", player_name)
 }
 
 pub fn started_hint(name: &String) -> String {
@@ -118,11 +131,8 @@ pub fn started_hint(name: &String) -> String {
     )
 }
 
-pub fn hold(score: u8, mention_string: &String) -> String {
-    format!(
-        "Your total score is {}. Next turn: {}",
-        score, mention_string
-    )
+pub fn hold(score: u8, next_player: &String) -> String {
+    format!("Your total score is {}. Next turn: {}", score, next_player)
 }
 
 pub fn hold_hint(name: &String, turn_score: u8, total_score: u8) -> String {
@@ -133,8 +143,7 @@ pub fn hold_hint(name: &String, turn_score: u8, total_score: u8) -> String {
         to the next player. \
         The player achieved {} points during the turn and now got {} \
         points in total. \
-        Tell your opinion about this decision. \
-        Also, don't forget to mention the next player username.",
+        Tell your opinion about this decision.",
         name, turn_score, total_score
     )
 }
@@ -149,6 +158,10 @@ pub fn reset_confirm_hint(name: &String) -> String {
 
 pub const fn reset() -> &'static str {
     "Game is reset (players should join again)."
+}
+
+pub const fn reset_due_lack_of_players() -> &'static str {
+    "Everybody left :( Game is reset."
 }
 
 pub const fn reset_hint() -> &'static str {

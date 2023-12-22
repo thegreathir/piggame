@@ -1,8 +1,9 @@
 use crate::prompt_messages::{
     already_joined, game_already_started, game_is_not_started, game_logic_error_hint, hold_hint,
-    join_after_play, joined, joined_hint, next_turn, next_turn_hint, not_enough_player,
-    not_your_turn, player_list_hint, reset, reset_confirm, reset_confirm_hint, reset_hint,
-    result_hint, started, started_hint, turn_lost, turn_lost_hint,
+    joined, joined_hint, next_turn, next_turn_hint, not_enough_player, not_joined, not_your_turn,
+    player_left, player_left_hint, player_list_hint, reset, reset_confirm, reset_confirm_hint,
+    reset_due_lack_of_players, reset_hint, result_hint, started, started_hint, turn_lost,
+    turn_lost_hint,
 };
 
 use super::message_action;
@@ -41,12 +42,12 @@ impl Player {
 
 #[derive(Debug)]
 enum GameLogicError {
-    JoinAfterPlay,
     AlreadyPlaying,
     IsNotPlaying,
     WrongTurn,
     NotEnoughPlayers,
     AlreadyJoined,
+    NotJoined,
 }
 
 impl GameLogicError {
@@ -57,12 +58,12 @@ impl GameLogicError {
         is_premium: bool,
     ) -> message_action::MessageAction {
         let text = match self {
-            Self::JoinAfterPlay => join_after_play(),
             Self::AlreadyJoined => already_joined(),
             Self::AlreadyPlaying => game_already_started(),
             Self::NotEnoughPlayers => not_enough_player(),
             Self::IsNotPlaying => game_is_not_started(),
             Self::WrongTurn => not_your_turn(),
+            Self::NotJoined => not_joined(),
         }
         .to_string();
         message_action::MessageAction::Send(message_action::MessageInfo {
@@ -79,6 +80,13 @@ enum AddDiceResult<'a> {
     Finished,
     TurnLost(&'a Player, u8),
     Continue(&'a Player, u8),
+}
+
+enum LeaveResult<'a> {
+    RunOutOfPlayers,
+    GameContinued,
+    PlayerLeft(u8),
+    CurrentPlayerLeft(u8, &'a Player),
 }
 
 #[derive(Default)]
@@ -225,7 +233,19 @@ impl GameState {
                     Err(GameLogicError::AlreadyJoined)
                 }
             }
-            GameState::Playing(_) => Err(GameLogicError::JoinAfterPlay),
+            GameState::Playing(playing_game) => {
+                if playing_game.players.iter().any(|p| p.user_id == user_id) {
+                    Err(GameLogicError::AlreadyJoined)
+                } else {
+                    playing_game.players.push(Player {
+                        user_id,
+                        score: 0,
+                        name,
+                        username: username.clone(),
+                    });
+                    Ok(())
+                }
+            }
         }
     }
 
@@ -341,11 +361,18 @@ impl GameState {
                             is_premium,
                         }),
                         message_action::MessageAction::Send(message_action::MessageInfo {
-                            text: next_turn(&current_player.get_mention_string()),
+                            text: next_turn(&current_player.name),
                             reply_to_message_id: None,
                             reply_markup: None,
                             hint: Some(next_turn_hint(&current_player.name)),
                             is_premium,
+                        }),
+                        message_action::MessageAction::Send(message_action::MessageInfo {
+                            text: current_player.get_mention_string(),
+                            reply_to_message_id: None,
+                            reply_markup: None,
+                            hint: None,
+                            is_premium: false,
                         }),
                     ]
                 }
@@ -371,11 +398,53 @@ impl GameState {
             vec![]
         }
     }
+
+    fn leave(&mut self, user_id: telegram_types::UserId) -> Result<LeaveResult, GameLogicError> {
+        match self {
+            GameState::New(new_game) => {
+                new_game.players.remove(&user_id);
+                Ok(LeaveResult::GameContinued)
+            }
+            GameState::Playing(playing_game) => {
+                let player_index = playing_game
+                    .players
+                    .iter()
+                    .position(|p| p.user_id == user_id);
+                match player_index {
+                    Some(index) => {
+                        let left_player = playing_game.players.remove(index);
+                        if playing_game.players.len() < 2 {
+                            return Ok(LeaveResult::RunOutOfPlayers);
+                        }
+
+                        if playing_game.turn as usize == index {
+                            let left_player_score = left_player.score + playing_game.current_score;
+                            playing_game.current_score = 0;
+                            playing_game.turn %= playing_game.players.len() as u8;
+                            return Ok(LeaveResult::CurrentPlayerLeft(
+                                left_player_score,
+                                playing_game.get_current_player(),
+                            ));
+                        }
+
+                        if playing_game.turn as usize > index {
+                            playing_game.turn -= 1;
+                        }
+
+                        Ok(LeaveResult::PlayerLeft(left_player.score))
+                    }
+                    None => Err(GameLogicError::NotJoined),
+                }
+            }
+        }
+    }
+
     pub fn handle_command(
         &mut self,
         message: &telegram_types::Message,
         command: &str,
     ) -> Vec<message_action::MessageAction> {
+        let is_premium = self.is_premium();
         if let Some(sender) = &message.from {
             match command {
                 "/join" | "/join@piiigdicegamebot" => {
@@ -399,51 +468,65 @@ impl GameState {
                             vec![err.get_reply_message(
                                 message.message_id,
                                 sender.first_name.clone(),
-                                self.is_premium(),
+                                is_premium,
                             )]
                         }
                     }
                 }
                 "/play" | "/play@piiigdicegamebot" => match self.play() {
                     Ok(current_player) => {
-                        vec![message_action::MessageAction::Send(
-                            message_action::MessageInfo {
-                                text: started(&current_player.get_mention_string()),
+                        vec![
+                            message_action::MessageAction::Send(message_action::MessageInfo {
+                                text: started(&current_player.name),
                                 reply_to_message_id: Some(message.message_id),
                                 reply_markup: None,
                                 hint: Some(started_hint(&current_player.name)),
-                                is_premium: self.is_premium(),
-                            },
-                        )]
+                                is_premium,
+                            }),
+                            message_action::MessageAction::Send(message_action::MessageInfo {
+                                text: current_player.get_mention_string(),
+                                reply_to_message_id: None,
+                                reply_markup: None,
+                                hint: None,
+                                is_premium: false,
+                            }),
+                        ]
                     }
                     Err(err) => {
                         vec![err.get_reply_message(
                             message.message_id,
                             sender.first_name.clone(),
-                            self.is_premium(),
+                            is_premium,
                         )]
                     }
                 },
                 "/hold" | "/hold@piiigdicegamebot" => match self.hold(sender.id) {
                     Ok((total_score, turn_score, current_player)) => {
-                        vec![message_action::MessageAction::Send(
-                            message_action::MessageInfo {
+                        vec![
+                            message_action::MessageAction::Send(message_action::MessageInfo {
                                 text: crate::prompt_messages::hold(
                                     total_score,
-                                    &current_player.get_mention_string(),
+                                    &current_player.name,
                                 ),
                                 reply_to_message_id: Some(message.message_id),
                                 reply_markup: None,
                                 hint: Some(hold_hint(&sender.first_name, turn_score, total_score)),
-                                is_premium: self.is_premium(),
-                            },
-                        )]
+                                is_premium,
+                            }),
+                            message_action::MessageAction::Send(message_action::MessageInfo {
+                                text: current_player.get_mention_string(),
+                                reply_to_message_id: None,
+                                reply_markup: None,
+                                hint: None,
+                                is_premium: false,
+                            }),
+                        ]
                     }
                     Err(err) => {
                         vec![err.get_reply_message(
                             message.message_id,
                             sender.first_name.clone(),
-                            self.is_premium(),
+                            is_premium,
                         )]
                     }
                 },
@@ -464,10 +547,78 @@ impl GameState {
                                 ]]),
                             }),
                             hint: Some(reset_confirm_hint(&sender.first_name)),
-                            is_premium: self.is_premium(),
+                            is_premium,
                         },
                     )]
                 }
+                "/leave" | "/leave@piiigdicegamebot" => match self.leave(sender.id) {
+                    Ok(LeaveResult::RunOutOfPlayers) => {
+                        self.reset();
+                        vec![message_action::MessageAction::Send(
+                            message_action::MessageInfo {
+                                text: reset_due_lack_of_players().to_string(),
+                                reply_to_message_id: Some(message.message_id),
+                                reply_markup: None,
+                                hint: Some(reset_hint().to_string()),
+                                is_premium,
+                            },
+                        )]
+                    }
+                    Ok(LeaveResult::GameContinued) => {
+                        vec![message_action::MessageAction::Send(
+                            message_action::MessageInfo {
+                                text: player_left().to_string(),
+                                reply_to_message_id: Some(message.message_id),
+                                reply_markup: None,
+                                hint: Some(player_left_hint(&sender.first_name, 0).to_string()),
+                                is_premium,
+                            },
+                        )]
+                    }
+                    Ok(LeaveResult::PlayerLeft(score)) => {
+                        vec![message_action::MessageAction::Send(
+                            message_action::MessageInfo {
+                                text: player_left().to_string(),
+                                reply_to_message_id: Some(message.message_id),
+                                reply_markup: None,
+                                hint: Some(player_left_hint(&sender.first_name, score).to_string()),
+                                is_premium,
+                            },
+                        )]
+                    }
+                    Ok(LeaveResult::CurrentPlayerLeft(score, current_player)) => {
+                        vec![
+                            message_action::MessageAction::Send(message_action::MessageInfo {
+                                text: player_left().to_string(),
+                                reply_to_message_id: Some(message.message_id),
+                                reply_markup: None,
+                                hint: Some(player_left_hint(&sender.first_name, score).to_string()),
+                                is_premium,
+                            }),
+                            message_action::MessageAction::Send(message_action::MessageInfo {
+                                text: next_turn(&current_player.name),
+                                reply_to_message_id: None,
+                                reply_markup: None,
+                                hint: Some(next_turn_hint(&current_player.name)),
+                                is_premium,
+                            }),
+                            message_action::MessageAction::Send(message_action::MessageInfo {
+                                text: current_player.get_mention_string(),
+                                reply_to_message_id: None,
+                                reply_markup: None,
+                                hint: None,
+                                is_premium: false,
+                            }),
+                        ]
+                    }
+                    Err(err) => {
+                        vec![err.get_reply_message(
+                            message.message_id,
+                            sender.first_name.clone(),
+                            is_premium,
+                        )]
+                    }
+                },
                 _ => vec![],
             }
         } else {
