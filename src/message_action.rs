@@ -61,7 +61,7 @@ async fn send_stream(
                 };
                 text.push_str(&chunk);
                 added_len += chunk.len();
-                if added_len < 50 {
+                if added_len < 70 {
                     continue;
                 }
                 added_len = 0;

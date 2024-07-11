@@ -1,9 +1,11 @@
 const DEFAULT_SYSTEM_MESSAGE: &str = "\
-    You are a Persian translator. \
+    You are a game bot. \
+    The game is a Pig dice game. \
     Be concise. \
     Be very brief. \
+    Rewrite the user's message, it's what you should say. \
+    Mention all the details about the game state. \
     Write up to 3 sentences but keep it short. \
-    Use informal language. \
     Free to use emojis.";
 
 pub fn system_message(extra_info: &Option<String>) -> String {
@@ -53,7 +55,6 @@ pub const fn player_list_hint() -> &'static str {
 pub const fn result_hint() -> &'static str {
     "\
     List of the players in the game and their achieved points provided. \
-    The game is a Pig dice game. \
     The player with king emoji (if exists) is the winner, \
     say congratulations to the winner (if exists). \
     The one with dice emoji (if exists) is the current player who possesses \
@@ -69,7 +70,7 @@ pub fn turn_lost_hint(name: &String, last_score: u8) -> String {
     format!(
         "\
         {} lost the turn after rolling a \"one\" by the dice. \
-        The game is a Pig dice game and the player lost the turn after adding {} by \
+        The player lost the turn after adding {} by \
         the previous rolled dice results during the turn. \
         Say your opinion about the player's performance during the last turn and \
         how lucky the player was.",
@@ -84,8 +85,7 @@ pub fn next_turn(player_name: &String) -> String {
 pub fn next_turn_hint(name: &String) -> String {
     format!(
         "\
-        The game is a Pig dice game and \
-        now it's {} turn to roll the dice.",
+        Now it's {} turn to roll the dice.",
         name
     )
 }
@@ -95,12 +95,7 @@ pub const fn joined() -> &'static str {
 }
 
 pub fn joined_hint(name: &String) -> String {
-    format!(
-        "\
-        The game is a Pig dice game and \
-        {} joined the game.",
-        name
-    )
+    format!("{} joined the game.", name)
 }
 
 pub const fn player_left() -> &'static str {
@@ -110,7 +105,6 @@ pub const fn player_left() -> &'static str {
 pub fn player_left_hint(name: &String, score: u8) -> String {
     format!(
         "\
-        The game is a Pig dice game and \
         {} left the game with {} points. \
         Say your opinion.",
         name, score
@@ -124,7 +118,6 @@ pub fn started(player_name: &String) -> String {
 pub fn started_hint(name: &String) -> String {
     format!(
         "\
-        The game is a Pig dice game. \
         Game has just started. \
         {} is the first player to roll the dice.",
         name
@@ -138,7 +131,6 @@ pub fn hold(score: u8, next_player: &String) -> String {
 pub fn hold_hint(name: &String, turn_score: u8, total_score: u8) -> String {
     format!(
         "\
-        The game is a Pig dice game. \
         {} decided to hold their achieved points and pass the dice \
         to the next player. \
         The player achieved {} points during the turn and now got {} \
@@ -153,7 +145,11 @@ pub const fn reset_confirm() -> &'static str {
 }
 
 pub fn reset_confirm_hint(name: &String) -> String {
-    format!("{} wants to reset the game.", name)
+    format!(
+        "{} wants to reset the game. \
+        Double check it by a question.",
+        name
+    )
 }
 
 pub const fn reset() -> &'static str {
@@ -165,5 +161,5 @@ pub const fn reset_due_lack_of_players() -> &'static str {
 }
 
 pub const fn reset_hint() -> &'static str {
-    "The game is a Pig dice game and it's reset."
+    "The game is reset."
 }
